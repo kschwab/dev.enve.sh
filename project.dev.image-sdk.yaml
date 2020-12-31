@@ -1,0 +1,96 @@
+build-runtime: true
+id: project.dev.image-sdk
+id-platform: project.dev.image-platform
+branch: '20.08'
+runtime: org.freedesktop.Platform
+runtime-version: '20.08'
+sdk: org.freedesktop.Sdk
+
+inherit-extensions:
+  - org.freedesktop.Sdk.Debug
+  - org.freedesktop.Sdk.Locale
+  - org.freedesktop.Sdk.Docs
+  - org.freedesktop.Sdk.Compat.i386
+  - org.freedesktop.Sdk.Extension
+  - org.freedesktop.Platform.GL
+  - org.freedesktop.Platform.Timezones
+  - org.freedesktop.Platform.GStreamer
+  - org.freedesktop.Platform.Icontheme
+  - org.freedesktop.Platform.VAAPI.Intel
+  - org.freedesktop.Platform.openh264
+  - org.gtk.Gtk3theme
+platform-extensions:
+  - org.freedesktop.Platform.Locale
+add-extensions:
+  project.dev.environ.extension:
+    directory: project/extensions
+    subdirectories: true
+
+modules:
+  - name: project_extensions
+    buildsystem: simple
+    build-commands:
+      - install -d /usr/project/extensions
+  - name: project
+    buildsystem: simple
+    build-commands:
+      - install projectrc -Dt /usr/project/configs
+      - install project_exec -Dt /usr/project/bin
+      - install project_bash -Dt /usr/local/bin
+      - ln -s /usr/local/bin/project_bash /usr/local/bin/bash
+    sources:
+      - type: file
+        path: projectrc
+      - type: script
+        dest-filename: project_exec
+        commands:
+          - export ENV=/usr/project/configs/projectrc
+          - if [ $# -eq 0 ]; then
+          -     exec sh
+          - else
+          -     BASH_POSIX_REGEX="s/((^|\/|\s)bash)(?=(\s|$))/\$1 --posix/g"
+          -     exec $(perl -pe "$BASH_POSIX_REGEX" <<< $@)
+          - fi
+      - type: script
+        dest-filename: project_bash
+        commands:
+          - export ENV=/usr/project/configs/projectrc
+          - exec /bin/bash --posix $@
+
+cleanup:
+  - /man
+  - /share/man
+  - /lib/systemd
+  - '*.la'
+# cleanup-commands:
+#   - /usr/libexec/freedesktop-post.sh
+cleanup-platform:
+  - /share/runtime/docs
+  - /include
+  - /share/aclocal
+  - /share/pkgconfig
+  - /lib/pkgconfig
+  - '/lib/*/pkgconfig'
+  - '*.a'
+  - '*.cmake'
+  - '/lib/*/cmake'
+  - /mkspecs
+  - /lib/mkspecs
+  - '*.prl'
+cleanup-platform-commands:
+  - /usr/libexec/freedesktop-post.sh
+
+finish-args:
+  - --filesystem=host
+  - --allow=devel
+  - --allow=multiarch
+  - --sdk=project.dev.image-sdk
+  - --runtime=project.dev.image-platform
+  - --env=PATH=/app/bin:/usr/local/bin:/usr/bin
+  # - --env=LD_LIBRARY_PATH=/app/lib
+  # - --env=PKG_CONFIG_PATH=/app/lib/pkgconfig:/app/share/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+  # - --env=ACLOCAL_PATH=/app/share/aclocal
+  # - --env=C_INCLUDE_PATH=/app/include
+  # - --env=CPLUS_INCLUDE_PATH=/app/include
+  # - --env=LDFLAGS=-L/app/lib
+  # - --env=LC_ALL=en_US.utf8

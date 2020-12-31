@@ -1,52 +1,60 @@
 app-id: project.dev.environ
 branch: '20.08'
-runtime: org.freedesktop.Sdk
+runtime: project.dev.image-sdk
 runtime-version: '20.08'
-sdk: org.freedesktop.Sdk
+sdk: project.dev.image-sdk
 
-command: environ.sh
+command: environ.py
 modules:
   - name: jsonnet
     buildsystem: simple
     build-options:
-      cflags: -g -03 -Wall -Wextra -pedantic -std=c99 -fPIC
+      cflags: -g -O3 -Wall -Wextra -pedantic -std=c99 -fPIC
       cxxflags: -g -O3 -Wall -Wextra -Woverloaded-virtual -pedantic -std=c++0x -fPIC
       env:
         PREFIX: /app
     build-commands:
       # diff -Naru file_original file_updated > file.patch
-      - patch -Np0 -i make_install.patch
+      # patch -Np0 -i make_install.patch
       - make -j4
       - make install
     sources:
       - type: archive
         url: https://github.com/google/jsonnet/archive/v0.17.0.tar.gz
         sha256: 076b52edf888c01097010ad4299e3b2e7a72b60a41abbc65af364af1ed3c8dbe
-      - type: file
+      - type: patch
+        # strip-components: 1
         path: make_install.patch
-  - name: environ.sh
+  - name: jsonnet-python
+    buildsystem: simple
+    build-options:
+      cflags: -fPIC
+      cxxflags: -fPIC
+    build-commands:
+      - pip3 install . --prefix=/app --no-deps
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/42/40/6f16e5ac994b16fa71c24310f97174ce07d3a97b433275589265c6b94d2b/jsonnet-0.17.0.tar.gz
+        sha256: 23ffcd4d03a10af7b20b53feee16627debe28345a4d7d5ed07881b7444553bfb
+  - name: click
     buildsystem: simple
     build-commands:
-      - install environ.sh -Dt /app/bin
-      - install bashrc -Dt /app/configs
-      - ln -s /app/bin/environ.sh /app/bin/sh
-      - ln -s /app/bin/environ.sh /app/bin/bash
+      - pip3 install . --prefix=/app --no-deps
     sources:
-      - type: script
-        dest-filename: environ.sh
-        commands:
-          - if [ $# -eq 0 ]; then
-          - exec /usr/bin/bash --rcfile /app/configs/bashrc
-          - else
-          - exec jsonnet -e ${@:1}
-          - fi
-      - type: script
-        dest-filename: bashrc
-        commands:
-          - export PS1="\u@$FLATPAK_ID \[\e[34m\]\w\[\e[0m\]\n[\[\e[31m\]📦\[\e[0m\]]$ "
-          - alias ls='ls --color=auto'
+      - type: archive
+        url: https://files.pythonhosted.org/packages/27/6f/be940c8b1f1d69daceeb0032fee6c34d7bd70e3e649ccac0951500b4720e/click-7.1.2.tar.gz
+        sha256: d2b5255c7c6349bc1bd1e59e08cd12acbbd63ce649f2588755783aa94dfb6b1a
+  - name: environ.py
+    buildsystem: simple
+    build-commands:
+      - install environ.py -Dt /app/bin
+    sources:
+      - type: file
+        path: environ.py
 
 finish-args:
   - --filesystem=host
   - --socket=session-bus
   - --allow=devel
+  - --allow=multiarch
+  - --share=network
