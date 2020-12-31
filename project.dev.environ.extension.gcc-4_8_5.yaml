@@ -1,5 +1,5 @@
 build-extension: true
-app-id: project.dev.environ.extension.gcc-4_8_5
+id: project.dev.environ.extension.gcc-4_8_5
 branch: '20.08'
 sdk: project.dev.image-sdk
 runtime: project.dev.image-sdk

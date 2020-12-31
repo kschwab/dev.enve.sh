@@ -130,8 +130,11 @@ def load_environ_config(project_config: str) -> [int, dict]:
 
     # If no project_config file was specified, we must abort with error
     if not project_config:
-        logger.error('Unable to locate Project config.')
-        return 1, project_environ
+        if click.confirm('Unable to locate Project config. Would you like you use the base environment?', default=True):
+            return 0, project_environ
+        else:
+            logger.error('Unable to locate Project config.')
+            return 1, project_environ
 
     # Jsonnet will validate the content for us and assert if anything is invalid.
     json_obj = json.loads(_jsonnet.evaluate_file(project_config))
@@ -141,6 +144,8 @@ def load_environ_config(project_config: str) -> [int, dict]:
     # specified.
     for flatpak_extension in json_obj['Project']['Environment']['Flatpak']['Extensions']:
         logger.info('Verifying Extension: %s', flatpak_extension['flatpak'])
+        logger.debug('%s:\n%s', flatpak_extension['flatpak'],
+                     textwrap.indent(pprint.pformat(flatpak_extension), '  '))
 
         # Verify the extension is installed, and attempt to install if not found
         if not extension_verify_installed(flatpak_extension):
@@ -242,6 +247,8 @@ def run_cmd(cmd: list, project_environ: dict, project_shell: bool, project_enabl
               help='''Path to project configuration jsonnet file. If not specified, the PROJECT_CONFIG environment
               variable will first be checked, followed by the "project_config.jsonnet" file in the git
               root directory.''')
+@click.option('--project_base_environ', is_flag=True,
+              help='''If set, will use the project dev base environment.''')
 @click.option('--project_shell', is_flag=True,
               help='''Opens a debug shell in the dev environment. Note, this may discard some provided arguments
               when entering the environment.''')
@@ -252,8 +259,8 @@ def run_cmd(cmd: list, project_environ: dict, project_shell: bool, project_enabl
               flatpak app will still retain and use the dev environment sandbox. The "detachment" is only accomplished
               from a system process point of view.''')
 @click.argument('cmd', nargs=-1)
-def cli(project_config: str, project_shell: bool, project_verbose: str, project_enable_detached: bool,
-        cmd: tuple) -> None:
+def cli(project_config: str, project_base_environ: bool, project_shell: bool, project_verbose: str,
+        project_enable_detached: bool, cmd: tuple) -> None:
     '''Add doc...'''
 
     # Set the logging default level and format
@@ -271,8 +278,11 @@ def cli(project_config: str, project_shell: bool, project_verbose: str, project_
         logger.setLevel(logging.INFO)
         logger.info('Info log level set.')
 
-    # Parse the environment configs
-    errno, project_environ = load_environ_config(project_config)
+    if project_base_environ:
+        errno, project_environ = [0, {}]
+    else:
+        # Parse the environment configs
+        errno, project_environ = load_environ_config(project_config)
 
     # Run the requested cmd using the project environment only if the project environment load was successful
     if errno == 0:
