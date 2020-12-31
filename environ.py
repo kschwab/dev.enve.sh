@@ -237,7 +237,7 @@ def run_cmd(cmd: list, project_environ: dict, project_shell: bool, project_enabl
     logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
     return subprocess.run(cmd).returncode
 
-@click.command(context_settings={"ignore_unknown_options": True})
+@click.command(context_settings={"ignore_unknown_options": True}, no_args_is_help=True)
 @click.option('--project_config', envvar='PROJECT_CONFIG', type=click.Path(exists=True),
               help='''Path to project configuration jsonnet file. If not specified, the PROJECT_CONFIG environment
               variable will first be checked, followed by the "project_config.jsonnet" file in the git
@@ -274,13 +274,9 @@ def cli(project_config: str, project_shell: bool, project_verbose: str, project_
     # Parse the environment configs
     errno, project_environ = load_environ_config(project_config)
 
-    # If a command was not specified, default to bash
-    if not cmd:
-        cmd = ('sh',)
-
     # Run the requested cmd using the project environment. If the project environment failed to load correctly (ie,
     # errno != 0), only proceed with running the command if it's a shell command.
-    if errno == 0 or cmd in [('bash',), ('sh',)] or project_shell:
+    if errno == 0:
         errno = run_cmd(list(cmd), project_environ, project_shell, project_enable_detached)
 
     # Exit with error code

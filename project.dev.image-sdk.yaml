@@ -45,6 +45,7 @@ modules:
         dest-filename: project_exec
         commands:
           - export ENV=/usr/project/configs/projectrc
+          - source $ENV
           - if [ $# -eq 0 ]; then
           -     exec sh
           - else
