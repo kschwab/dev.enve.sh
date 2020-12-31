@@ -274,8 +274,7 @@ def cli(project_config: str, project_shell: bool, project_verbose: str, project_
     # Parse the environment configs
     errno, project_environ = load_environ_config(project_config)
 
-    # Run the requested cmd using the project environment. If the project environment failed to load correctly (ie,
-    # errno != 0), only proceed with running the command if it's a shell command.
+    # Run the requested cmd using the project environment only if the project environment load was successful
     if errno == 0:
         errno = run_cmd(list(cmd), project_environ, project_shell, project_enable_detached)
 
