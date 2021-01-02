@@ -1,1 +1,3 @@
-# ENVE: A Flatpak **EN**vironment **VE**rsion Shell
+[ENVE Logo](ENVE_Logo.png)
+
+# ENVE: A Flatpak ENvironment VErsion Shell
