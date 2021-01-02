@@ -1,31 +1,14 @@
-app-id: project.dev.environ
+app-id: com.enve.sh
 branch: '20.08'
-runtime: project.dev.image-sdk
+runtime: org.freedesktop.Sdk
 runtime-version: '20.08'
-sdk: project.dev.image-sdk
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.enve
 
-command: environ.py
+command: /app/bin/enve
 modules:
   - name: jsonnet
-    buildsystem: simple
-    build-options:
-      cflags: -g -O3 -Wall -Wextra -pedantic -std=c99 -fPIC
-      cxxflags: -g -O3 -Wall -Wextra -Woverloaded-virtual -pedantic -std=c++0x -fPIC
-      env:
-        PREFIX: /app
-    build-commands:
-      # diff -Naru file_original file_updated > file.patch
-      # patch -Np0 -i make_install.patch
-      - make -j4
-      - make install
-    sources:
-      - type: archive
-        url: https://github.com/google/jsonnet/archive/v0.17.0.tar.gz
-        sha256: 076b52edf888c01097010ad4299e3b2e7a72b60a41abbc65af364af1ed3c8dbe
-      - type: patch
-        # strip-components: 1
-        path: make_install.patch
-  - name: jsonnet-python
     buildsystem: simple
     build-options:
       cflags: -fPIC
@@ -44,13 +27,13 @@ modules:
       - type: archive
         url: https://files.pythonhosted.org/packages/27/6f/be940c8b1f1d69daceeb0032fee6c34d7bd70e3e649ccac0951500b4720e/click-7.1.2.tar.gz
         sha256: d2b5255c7c6349bc1bd1e59e08cd12acbbd63ce649f2588755783aa94dfb6b1a
-  - name: environ.py
+  - name: enve.py
     buildsystem: simple
     build-commands:
-      - install environ.py -Dt /app/bin
+      - install enve.py -D /app/bin/enve
     sources:
       - type: file
-        path: environ.py
+        path: enve.py
 
 finish-args:
   - --filesystem=host

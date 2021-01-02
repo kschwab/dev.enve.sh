@@ -1,0 +1,43 @@
+build-extension: true
+id: org.freedesktop.Sdk.Extension.enve
+branch: '20.08'
+runtime: org.freedesktop.Sdk
+runtime-version: '20.08'
+sdk: org.freedesktop.Sdk
+separate-locales: false
+appstream-compose: false
+
+modules:
+  - name: enve
+    buildsystem: simple
+    build-commands:
+      - install enve_bashrc -Dt /usr/lib/sdk/enve
+      - install enve_run -Dt /usr/lib/sdk/enve
+      - install enve_run_dbg -D /usr/lib/sdk/enve
+      - install enve_posix_bash -D /usr/lib/sdk/enve/bin/bash
+    sources:
+      - type: file
+        path: enve_bashrc
+      - type: script
+        dest-filename: enve_run
+        commands:
+          - export ENV=/usr/lib/sdk/enve/enve_bashrc
+          - source $ENV
+          - if [ $# -eq 0 ]; then
+          -     sh
+          - else
+          -     eval $@
+          - fi
+      - type: script
+        dest-filename: enve_run_dbg
+        commands:
+          - export ENV=/usr/lib/sdk/enve/enve_bashrc
+          - source $ENV
+          - if [ $# -ne 0 ]; then
+          -     eval $@
+          - fi
+          - sh
+      - type: script
+        dest-filename: enve_posix_bash
+        commands:
+          - /bin/bash --posix $@

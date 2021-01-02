@@ -21,8 +21,7 @@ def extension_verify_installed(flatpak_extension: dict) -> bool:
     # the extension is installed.
     if subprocess.run(['flatpak-spawn', '--host', 'flatpak', 'info', flatpak_extension['flatpak']],
                       capture_output=True).returncode != 0:
-        logger.warning('%s-%s extension missing, installing...', flatpak_extension['name'],
-                       flatpak_extension['version'])
+        logger.warning('%s extension missing, installing...', flatpak_extension['id'])
 
         # The extension is missing, so attempt to install. A return code of 0 means it installed successfully.
         completed_output = subprocess.run(['flatpak-spawn', '--host', 'flatpak', 'install', '--user',
@@ -30,11 +29,11 @@ def extension_verify_installed(flatpak_extension: dict) -> bool:
         if completed_output.returncode != 0:
             # The installation of the extension failed, meaning we can't load the specified environment and will
             # have to abort.
-            logger.error('%s-%s extension install failed:\n%s', flatpak_extension['name'], flatpak_extension['version'],
+            logger.error('%s extension install failed:\n%s', flatpak_extension['id'],
                          textwrap.indent(completed_output.stderr, '  '))
             return False
 
-        logger.info('%s-%s extension install succeeded.', flatpak_extension['name'], flatpak_extension['version'])
+        logger.info('%s extension install succeeded.', flatpak_extension['id'])
 
     return True
 
@@ -52,15 +51,14 @@ def extension_verify_commit(flatpak_extension: dict) -> bool:
                                           capture_output=True, text=True)
         # We already verified the extension is installed earlier, so expect the flatpak query to succeed.
         if completed_output.returncode != 0:
-            logger.error('Unable to get info for %s-%s:\n%s', flatpak_extension['name'], flatpak_extension['version'],
+            logger.error('Unable to get info for %s:\n%s', flatpak_extension['id'],
                          textwrap.indent(completed_output.stderr, '  '))
             return False
 
         # If the commit SHA does not match the currently installed commit SHA, update the installed flatpak to
         # the specified commit SHA.
         if flatpak_extension['commit'] != completed_output.stdout.strip()[:len(flatpak_extension['commit'])]:
-            logger.warning('%s-%s installed commit mismatch, updating...', flatpak_extension['name'],
-                           flatpak_extension['version'])
+            logger.warning('%s installed commit mismatch, updating...', flatpak_extension['id'])
 
             # Update the installed flatpak to the specified commit SHA
             completed_output = subprocess.run(['flatpak-spawn', '--host', 'flatpak', 'update', '--commit=',
@@ -69,15 +67,15 @@ def extension_verify_commit(flatpak_extension: dict) -> bool:
             if completed_output.returncode != 0:
                 # The update of the extension failed, meaning we can't load the specified environment and will
                 # have to abort loading the environment.
-                logger.error('%s-%s extension update failed:\n%s', flatpak_extension['name'],
-                             flatpak_extension['version'], textwrap.indent(completed_output.stderr, '  '))
+                logger.error('%s extension update failed:\n%s', flatpak_extension['id'],
+                             textwrap.indent(completed_output.stderr, '  '))
                 return False
 
-            logger.info('%s-%s extension install succeeded.', flatpak_extension['name'], flatpak_extension['version'])
+            logger.info('%s extension install succeeded.', flatpak_extension['id'])
 
     return True
 
-def extension_add_paths(flatpak_extension: dict, load_directories: list, project_environ: dict) -> None:
+def extension_add_paths(flatpak_extension: dict, load_directories: list, enve_vars: dict) -> None:
     '''Add doc...'''
 
     # Get the logger instance
@@ -92,57 +90,58 @@ def extension_add_paths(flatpak_extension: dict, load_directories: list, project
         if os.path.exists(flatpak_extension_path):
 
             # Add to project specific path environment variable
-            flatpak_extension_path_env_var = '_'.join(['PROJECT', flatpak_extension['name'], directory, 'PATH']).upper()
-            if flatpak_extension_path_env_var in project_environ:
-                project_environ[flatpak_extension_path_env_var].insert(0, flatpak_extension_path)
+            flatpak_extension_path_enve_var = '_'.join(
+                ['ENVE', flatpak_extension['enve_alias'], directory, 'PATH']).upper()
+            if flatpak_extension_path_enve_var in enve_vars:
+                enve_vars[flatpak_extension_path_enve_var].insert(0, flatpak_extension_path)
             else:
-                project_environ[flatpak_extension_path_env_var] = [flatpak_extension_path]
+                enve_vars[flatpak_extension_path_enve_var] = [flatpak_extension_path]
 
             # Add to project cumulative path environment variable
-            project_path_env_var = '_'.join(['PROJECT', directory, 'PATH']).upper()
-            if project_path_env_var in project_environ:
-                project_environ[project_path_env_var].insert(0, flatpak_extension_path)
+            project_path_enve_var = '_'.join(['ENVE', directory, 'PATH']).upper()
+            if project_path_enve_var in enve_vars:
+                enve_vars[project_path_enve_var].insert(0, flatpak_extension_path)
             else:
-                project_environ[project_path_env_var] = [flatpak_extension_path]
+                enve_vars[project_path_enve_var] = [flatpak_extension_path]
 
-    logger.debug('Project Environment Variables:\n%s', textwrap.indent(pprint.pformat(project_environ), '  '))
+    logger.debug('Project Environment Variables:\n%s', textwrap.indent(pprint.pformat(enve_vars), '  '))
 
-def load_environ_config(project_config: str) -> [int, dict]:
+def load_environ_config(enve_config: str) -> [int, dict]:
     '''Add doc...'''
 
     # Initialize the project environment dictionary
-    project_environ = { }
+    enve_vars = { }
     # Get the logger instance
     logger = logging.getLogger(__name__)
 
-    # If the project_config file is not specified via the command line or environment variable, check to see if it
+    # If the enve_config file is not specified via the command line or environment variable, check to see if it
     # exists in git root directory (if we're in a git repo).
-    if not project_config:
+    if not enve_config:
 
         # Get the git root directory, where a return code of zero means we're not in a git repo.
         completed_output = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
         if completed_output.returncode == 0:
 
-            # Check to see if the project_config.jsonnet file exists in the git root directory.
-            git_root_path_project_config = os.path.join(completed_output.stdout.strip(), 'project_config.jsonnet')
-            if os.path.exists(git_root_path_project_config):
-                project_config = git_root_path_project_config
+            # Check to see if the enve_config.jsonnet file exists in the git root directory.
+            git_root_path_enve_config = os.path.join(completed_output.stdout.strip(), 'enve.jsonnet')
+            if os.path.exists(git_root_path_enve_config):
+                enve_config = git_root_path_enve_config
 
-    # If no project_config file was specified, we must abort with error
-    if not project_config:
+    # If no enve_config file was specified, prompt user on how to proceed
+    if not enve_config:
         if click.confirm('Unable to locate Project config. Would you like you use the base environment?', default=True):
-            return 0, project_environ
+            return 0, enve_vars
         else:
             logger.error('Unable to locate Project config.')
-            return 1, project_environ
+            return 1, enve_vars
 
     # Jsonnet will validate the content for us and assert if anything is invalid.
-    json_obj = json.loads(_jsonnet.evaluate_file(project_config))
-    load_directories = json_obj['Project']['Environment']['Flatpak']['Constant']['EXTENSION_LOAD_DIRECTORIES']
+    enve_json = json.loads(_jsonnet.evaluate_file(enve_config))['Enve']
+    load_directories = enve_json['Flatpak']['Constant']['EXTENSION_LOAD_DIRECTORIES']
 
     # Ensure all the specified project flatpak extensions are installed with the right commit versions if
     # specified.
-    for flatpak_extension in json_obj['Project']['Environment']['Flatpak']['Extensions']:
+    for flatpak_extension in enve_json['Flatpak']['Extensions']:
         logger.info('Verifying Extension: %s', flatpak_extension['flatpak'])
         logger.debug('%s:\n%s', flatpak_extension['flatpak'],
                      textwrap.indent(pprint.pformat(flatpak_extension), '  '))
@@ -150,19 +149,19 @@ def load_environ_config(project_config: str) -> [int, dict]:
         # Verify the extension is installed, and attempt to install if not found
         if not extension_verify_installed(flatpak_extension):
             logger.error('Project environment load failed.')
-            return 1, project_environ
+            return 1, enve_vars
 
         # Verify the extension commit matches the specified, and attempt to update if SHAs mismatch
         if not extension_verify_commit(flatpak_extension):
             logger.error('Project environment load failed.')
-            return 1, project_environ
+            return 1, enve_vars
 
         # Add the extension load directory paths to the load directories dictionary
-        extension_add_paths(flatpak_extension, load_directories, project_environ)
+        extension_add_paths(flatpak_extension, load_directories, enve_vars)
 
-    return 0, project_environ
+    return 0, enve_vars
 
-def run_cmd(cmd: list, project_environ: dict, project_shell: bool, project_enable_detached: bool) -> int:
+def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_detached: bool) -> int:
     '''Add doc...'''
 
     # Get the logger instance
@@ -178,35 +177,29 @@ def run_cmd(cmd: list, project_environ: dict, project_shell: bool, project_enabl
         # using flatpak-spawn.
         if completed_output.returncode == 0:
 
-            # If debug shell is enabled, override any other commands and just launch a bash shell inside of the flatpak
-            # app with the project environment enabled
-            if project_shell:
-                if cmd[1:]:
-                    logger.warning('Project debug shell enabled, ignoring these provided arguments:\n%s',
-                                   textwrap.indent(pprint.pformat(cmd[1:]), '  '))
-                cmd = [cmd[0], 'sh']
-            else:
-                # Get the internal command ran by the flatpak app
-                config = configparser.ConfigParser()
-                config.read_string(completed_output.stdout)
-                cmd.insert(1, config['Application']['command'])
+            # Get the internal command ran by the flatpak app
+            config = configparser.ConfigParser()
+            config.read_string(completed_output.stdout)
+            cmd.insert(1, config['Application']['command'])
 
             flatpak_spawn_cmd = ['flatpak-spawn', '--host', 'flatpak', 'run',
-                                 '--command=/usr/project/bin/project_exec',
-                                 '--runtime=project.dev.image-sdk',
+                                 '--command=/usr/lib/sdk/enve/enve_run%s' % ('_dbg' if enve_use_debug_shell else ''),
+                                 '--runtime=org.freedesktop.Sdk',
                                  '--filesystem=host',
+                                 "--filesystem=/tmp",
                                  '--socket=session-bus',
                                  '--allow=devel',
                                  '--allow=multiarch',
-                                 '--share=network'] + \
-                                 ['--env=%s=%s' % (env_var, ':'.join(project_environ[env_var])) for env_var in project_environ]
-            flatpak_spawn_cmd += ['--parent-pid=%d' % os.getpid(), '--die-with-parent'] if not project_enable_detached else []
+                                 '--share=network',
+                                 '--device=all'] + \
+                                 ['--env=%s=%s' % (enve_var, ':'.join(enve_vars[enve_var])) for enve_var in enve_vars]
+            flatpak_spawn_cmd += ['--parent-pid=%d' % os.getpid(), '--die-with-parent'] if not enve_enable_detached else []
 
             logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
 
             # Run the app using flatpak-spawn under the host system
-            if project_enable_detached:
-                if project_shell:
+            if enve_enable_detached:
+                if enve_use_debug_shell:
                     logger.warning('Cannot run detached when debug shell is enabled. Disabling flatpak app detachment.')
                 else:
                     # When running detached we have to use the subprocess.Popen method in order to gain access to the
@@ -225,42 +218,36 @@ def run_cmd(cmd: list, project_environ: dict, project_shell: bool, project_enabl
     # flatpak session.
 
     # Export the project environment variables into the current environment
-    for env_var in project_environ:
-        os.environ[env_var] = ':'.join(project_environ[env_var])
+    for enve_var in enve_vars:
+        os.environ[enve_var] = ':'.join(enve_vars[enve_var])
 
-    # Update the cmd to use the project exec script to run
-    cmd.insert(0, '/usr/project/bin/project_exec')
-
-    # If debug shell is enabled, override any other commands and just launch a bash shell in the current environment
-    if project_shell:
-        if cmd[1:]:
-            logger.warning('Project debug shell enabled, ignoring these provided arguments:\n%s',
-                           textwrap.indent(pprint.pformat(cmd[1:]), '  '))
-        cmd = [cmd[0], 'sh']
+    # Update the cmd to use the enve_run script for running
+    if enve_use_debug_shell:
+        cmd.insert(0, '/usr/lib/sdk/enve/enve_run_dbg')
+    else:
+        cmd.insert(0, '/usr/lib/sdk/enve/enve_run')
 
     # Run the command to copmletion
     logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
     return subprocess.run(cmd).returncode
 
-@click.command(context_settings={"ignore_unknown_options": True}, no_args_is_help=True)
-@click.option('--project_config', envvar='PROJECT_CONFIG', type=click.Path(exists=True),
-              help='''Path to project configuration jsonnet file. If not specified, the PROJECT_CONFIG environment
-              variable will first be checked, followed by the "project_config.jsonnet" file in the git
-              root directory.''')
-@click.option('--project_base_environ', is_flag=True,
-              help='''If set, will use the project dev base environment.''')
-@click.option('--project_shell', is_flag=True,
-              help='''Opens a debug shell in the dev environment. Note, this may discard some provided arguments
-              when entering the environment.''')
-@click.option('--project_verbose', type=click.Choice(['warning', 'info', 'debug']), default='warning',
+@click.command(context_settings={"ignore_unknown_options": True})
+@click.option('--enve-config', envvar='ENVE_CONFIG', type=click.Path(exists=True),
+              help='''Path to the enve configuration file. If not specified, the ENVE_CONFIG environment
+              variable will first be checked, followed by the "enve.jsonnet" file in the git root directory.''')
+@click.option('--enve-use-base-config', is_flag=True,
+              help='''If set, will use the ENVE base config for setting up the environment.''')
+@click.option('--enve-use-debug-shell', is_flag=True,
+              help='''Opens a debug shell in the environment before running the commands.''')
+@click.option('--enve-use-verbose', type=click.Choice(['warning', 'info', 'debug']), default='warning',
               help='Set the verbose level. Default is "warning".')
-@click.option('--project_enable_detached', is_flag=True,
-              help='''Enables a flatpak app to run detached from the project.dev.environ app. Note, the detached
-              flatpak app will still retain and use the dev environment sandbox. The "detachment" is only accomplished
-              from a system process point of view.''')
+@click.option('--enve-enable-detached/--enve-disable-detached', is_flag=True,
+              help='''Enable/disable a flatpak app from running detached. Note, the detached flatpak app will still
+              retain ENVE sandbox configuration. The "detachment" is only accomplished from a system process point
+              of view. Default is disabled.''')
 @click.argument('cmd', nargs=-1)
-def cli(project_config: str, project_base_environ: bool, project_shell: bool, project_verbose: str,
-        project_enable_detached: bool, cmd: tuple) -> None:
+def cli(enve_config: str, enve_use_base_config: bool, enve_use_debug_shell: bool, enve_use_verbose: str,
+        enve_enable_detached: bool, cmd: tuple) -> None:
     '''Add doc...'''
 
     # Set the logging default level and format
@@ -271,22 +258,26 @@ def cli(project_config: str, project_base_environ: bool, project_shell: bool, pr
     # Set the default log level
     logger.setLevel(logging.WARNING)
     # Update the logger verbosity level if specified
-    if 'debug' == project_verbose:
+    if 'debug' == enve_use_verbose:
         logger.setLevel(logging.DEBUG)
         logger.info('Debug log level set.')
-    elif 'info' == project_verbose:
+    elif 'info' == enve_use_verbose:
         logger.setLevel(logging.INFO)
         logger.info('Info log level set.')
 
-    if project_base_environ:
-        errno, project_environ = [0, {}]
+    if enve_use_base_config:
+        errno, enve_vars = [0, {}]
     else:
         # Parse the environment configs
-        errno, project_environ = load_environ_config(project_config)
+        errno, enve_vars = load_environ_config(enve_config)
+
+    # If no command is specified, start the shell by default
+    if not cmd:
+        cmd = ('sh',)
 
     # Run the requested cmd using the project environment only if the project environment load was successful
     if errno == 0:
-        errno = run_cmd(list(cmd), project_environ, project_shell, project_enable_detached)
+        errno = run_cmd(list(cmd), enve_vars, enve_use_debug_shell, enve_enable_detached)
 
     # Exit with error code
     exit(errno)
