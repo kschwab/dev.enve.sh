@@ -1,3 +1,3 @@
-![ENVE Logo](ENVE_Logo.png)
+![ENVE Banner](ENVE_Banner.png)
 
-# ENVE: A Flatpak ENvironment VErsion Shell
+# A Flatpak ENvironment VErsion Shell
