@@ -13,6 +13,7 @@ modules:
     builddir: true
     build-commands:
       - ./install.sh
+      - install enve_extension.jsonnet -D $FLATPAK_DEST
     sources:
       - type: script
         dest-filename: install.sh
@@ -88,3 +89,5 @@ modules:
         path: libgcc_ucontext.patch
       - type: file
         path: libsanitizer.patch
+      - type: file
+        path: enve_extension.jsonnet

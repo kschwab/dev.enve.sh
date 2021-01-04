@@ -11,6 +11,9 @@ import configparser
 import pprint
 import textwrap
 
+ENVE_LIBSONNET_PATH = '/app/enve.libsonnet'
+ENVE_BASE_CONFIG_PATH = '/app/enve.jsonnet'
+
 def extension_verify_installed(flatpak_extension: dict) -> bool:
     '''Add doc...'''
 
@@ -44,7 +47,7 @@ def extension_verify_commit(flatpak_extension: dict) -> bool:
     logger = logging.getLogger(__name__)
 
     # Verify the installed flatpak extension matches the commit SHA if specified.
-    if flatpak_extension['commit'] != None:
+    if flatpak_extension['commit'] != '':
 
         # Get the flatpak extension commit SHA
         completed_output = subprocess.run(['flatpak-spawn', '--host', 'flatpak', 'info', '--show-commit'],
@@ -75,41 +78,44 @@ def extension_verify_commit(flatpak_extension: dict) -> bool:
 
     return True
 
-def extension_add_paths(flatpak_extension: dict, load_directories: list, enve_vars: dict) -> None:
+def import_callback(dir_path: str, filename:str) -> [str, str]:
+    '''Add doc...'''
+
+    if filename == 'enve.libsonnet':
+        with open(ENVE_LIBSONNET_PATH) as enve_libsonnet:
+            return ENVE_LIBSONNET_PATH, enve_libsonnet.read()
+
+def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', extension_path: str = '') -> None:
     '''Add doc...'''
 
     # Get the logger instance
     logger = logging.getLogger(__name__)
 
-    # For each directory in the load directories, check to see if the path exists for the Project extension
-    for directory in load_directories:
+    for variable in variables:
+        values = variable['values']
+        if variable['values_are_paths'] and extension_path:
+            values = [os.path.join(extension_path, value) for value in values]
 
-        # If the path exists for the Project extension, add the path to the dictionary to later be exported into the
-        # environment
-        flatpak_extension_path = os.path.join(flatpak_extension['path'], directory)
-        if os.path.exists(flatpak_extension_path):
+        value = variable['delimiter'].join(values) if len(values) > 1 else values[0]
 
-            # Add to project specific path environment variable
-            flatpak_extension_path_enve_var = '_'.join(
-                ['ENVE', flatpak_extension['enve_alias'], directory, 'PATH']).upper()
-            if flatpak_extension_path_enve_var in enve_vars:
-                enve_vars[flatpak_extension_path_enve_var].insert(0, flatpak_extension_path)
+        variable_names = ['ENVE_PATH'] if variable['path_export'] else []
+        if extension_alias:
+            variable_names += ['_'.join(['ENVE', extension_alias, variable['name']]).upper()]
+        else:
+            variable_names += ['_'.join(['ENVE', variable['name']]).upper()]
+
+        for variable_name in variable_names:
+            if variable_name in enve_vars:
+                enve_vars[variable_name] += variable['delimiter'] + value
+            elif variable['delimit_first']:
+                enve_vars[variable_name] = variable['delimiter'] + value
             else:
-                enve_vars[flatpak_extension_path_enve_var] = [flatpak_extension_path]
-
-            # Add to project cumulative path environment variable
-            project_path_enve_var = '_'.join(['ENVE', directory, 'PATH']).upper()
-            if project_path_enve_var in enve_vars:
-                enve_vars[project_path_enve_var].insert(0, flatpak_extension_path)
-            else:
-                enve_vars[project_path_enve_var] = [flatpak_extension_path]
-
-    logger.debug('Project Environment Variables:\n%s', textwrap.indent(pprint.pformat(enve_vars), '  '))
+                enve_vars[variable_name] = value
 
 def load_environ_config(enve_config: str) -> [int, dict]:
     '''Add doc...'''
 
-    # Initialize the project environment dictionary
+    # Initialize the ENVE variables dictionary
     enve_vars = { }
     # Get the logger instance
     logger = logging.getLogger(__name__)
@@ -129,35 +135,42 @@ def load_environ_config(enve_config: str) -> [int, dict]:
 
     # If no enve_config file was specified, prompt user on how to proceed
     if not enve_config:
-        if click.confirm('Unable to locate Project config. Would you like you use the base environment?', default=True):
-            return 0, enve_vars
+        if click.confirm('Unable to locate ENVE config. Would you like you use the base environment?', default=True):
+            enve_config = ENVE_BASE_CONFIG_PATH
         else:
-            logger.error('Unable to locate Project config.')
+            logger.error('Unable to locate ENVE config.')
             return 1, enve_vars
 
     # Jsonnet will validate the content for us and assert if anything is invalid.
-    enve_json = json.loads(_jsonnet.evaluate_file(enve_config))['Enve']
-    load_directories = enve_json['Flatpak']['Constant']['EXTENSION_LOAD_DIRECTORIES']
+    try:
+        enve_json = json.loads(_jsonnet.evaluate_file(enve_config, import_callback=import_callback))['Enve']
+    except Exception as err:
+        logger.exception('Failed to load ENVE config "%s".', enve_config)
+        return 1, enve_vars
 
-    # Ensure all the specified project flatpak extensions are installed with the right commit versions if
-    # specified.
-    for flatpak_extension in enve_json['Flatpak']['Extensions']:
+    add_variables(enve_vars, enve_json['variables'])
+
+    # Ensure all the specified flatpak extensions are installed with the right commit versions if specified.
+    for flatpak_extension in reversed(enve_json['extensions']):
         logger.info('Verifying Extension: %s', flatpak_extension['flatpak'])
         logger.debug('%s:\n%s', flatpak_extension['flatpak'],
                      textwrap.indent(pprint.pformat(flatpak_extension), '  '))
 
         # Verify the extension is installed, and attempt to install if not found
         if not extension_verify_installed(flatpak_extension):
-            logger.error('Project environment load failed.')
+            logger.error('ENVE load failed.')
             return 1, enve_vars
 
         # Verify the extension commit matches the specified, and attempt to update if SHAs mismatch
         if not extension_verify_commit(flatpak_extension):
-            logger.error('Project environment load failed.')
+            logger.error('ENVE load failed.')
             return 1, enve_vars
 
         # Add the extension load directory paths to the load directories dictionary
-        extension_add_paths(flatpak_extension, load_directories, enve_vars)
+        add_variables(enve_vars, flatpak_extension['variables'], flatpak_extension['id_alias'],
+                      flatpak_extension['path'])
+
+    logger.debug('ENVE Variables:\n%s', textwrap.indent(pprint.pformat(enve_vars), '  '))
 
     return 0, enve_vars
 
@@ -192,7 +205,8 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
                                  '--allow=multiarch',
                                  '--share=network',
                                  '--device=all'] + \
-                                 ['--env=%s=%s' % (enve_var, ':'.join(enve_vars[enve_var])) for enve_var in enve_vars]
+                                 ['--env=%s=%s' % (enve_var, enve_vars[enve_var]) for enve_var in enve_vars]
+
             flatpak_spawn_cmd += ['--parent-pid=%d' % os.getpid(), '--die-with-parent'] if not enve_enable_detached else []
 
             logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
@@ -212,14 +226,14 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
         else:
             # Log a warning about using suspected flatpak command as regular system command
             logger.warning('Command "%s" suspected as flatpak app but not found.', cmd[0])
-            logger.warning('Treating "%s" as regular system command.', cmd[0])
+            logger.warning('Treating "%s" as regular system command.', cmd[0]) # PROMPT HERE??
 
     # The command does not appear to be a flatpak app, so we'll just run the command here locally without spawning a new
     # flatpak session.
 
-    # Export the project environment variables into the current environment
+    # Export the ENVE variables into the current environment
     for enve_var in enve_vars:
-        os.environ[enve_var] = ':'.join(enve_vars[enve_var])
+        os.environ[enve_var] = enve_vars[enve_var]
 
     # Update the cmd to use the enve_run script for running
     if enve_use_debug_shell:
@@ -231,8 +245,9 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
     logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
     return subprocess.run(cmd).returncode
 
+# TODO: Add sandbox option
 @click.command(context_settings={"ignore_unknown_options": True})
-@click.option('--enve-config', envvar='ENVE_CONFIG', type=click.Path(exists=True),
+@click.option('--enve-use-config', envvar='ENVE_CONFIG', type=click.Path(exists=True),
               help='''Path to the enve configuration file. If not specified, the ENVE_CONFIG environment
               variable will first be checked, followed by the "enve.jsonnet" file in the git root directory.''')
 @click.option('--enve-use-base-config', is_flag=True,
@@ -246,7 +261,7 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
               retain ENVE sandbox configuration. The "detachment" is only accomplished from a system process point
               of view. Default is disabled.''')
 @click.argument('cmd', nargs=-1)
-def cli(enve_config: str, enve_use_base_config: bool, enve_use_debug_shell: bool, enve_use_verbose: str,
+def cli(enve_use_config: str, enve_use_base_config: bool, enve_use_debug_shell: bool, enve_use_verbose: str,
         enve_enable_detached: bool, cmd: tuple) -> None:
     '''Add doc...'''
 
@@ -269,13 +284,13 @@ def cli(enve_config: str, enve_use_base_config: bool, enve_use_debug_shell: bool
         errno, enve_vars = [0, {}]
     else:
         # Parse the environment configs
-        errno, enve_vars = load_environ_config(enve_config)
+        errno, enve_vars = load_environ_config(enve_use_config)
 
     # If no command is specified, start the shell by default
     if not cmd:
         cmd = ('sh',)
 
-    # Run the requested cmd using the project environment only if the project environment load was successful
+    # Run the requested cmd using ENVE only if the ENVE load was successful
     if errno == 0:
         errno = run_cmd(list(cmd), enve_vars, enve_use_debug_shell, enve_enable_detached)
 
@@ -284,3 +299,6 @@ def cli(enve_config: str, enve_use_base_config: bool, enve_use_debug_shell: bool
 
 if __name__ == '__main__':
     cli(prog_name=os.environ['FLATPAK_ID'])
+
+
+# TODO: We can skip doing work if already in the shell and the command is not a flatpak app... just simply pass it through or eval it...
