@@ -8,20 +8,67 @@ separate-locales: false
 appstream-compose: false
 
 modules:
+  - name: jsonnet
+    buildsystem: simple
+    build-options:
+      cflags: -g -O3 -Wall -Wextra -pedantic -std=c99 -fPIC
+      cxxflags: -g -O3 -Wall -Wextra -Woverloaded-virtual -pedantic -std=c++0x -fPIC
+      env:
+        PREFIX: /usr/lib/sdk/enve
+    build-commands:
+      - make -j4
+      - make install
+    sources:
+      - type: archive
+        url: https://github.com/google/jsonnet/archive/v0.17.0.tar.gz
+        sha256: 076b52edf888c01097010ad4299e3b2e7a72b60a41abbc65af364af1ed3c8dbe
+      - type: patch
+        path: make_install.patch
+  - name: jsonnet-python
+    buildsystem: simple
+    build-options:
+      cflags: -fPIC
+      cxxflags: -fPIC
+    build-commands:
+      - pip3 install . --prefix=$FLATPAK_DEST --no-deps
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/42/40/6f16e5ac994b16fa71c24310f97174ce07d3a97b433275589265c6b94d2b/jsonnet-0.17.0.tar.gz
+        sha256: 23ffcd4d03a10af7b20b53feee16627debe28345a4d7d5ed07881b7444553bfb
+  - name: click
+    buildsystem: simple
+    build-commands:
+      - pip3 install . --prefix=$FLATPAK_DEST --no-deps
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/27/6f/be940c8b1f1d69daceeb0032fee6c34d7bd70e3e649ccac0951500b4720e/click-7.1.2.tar.gz
+        sha256: d2b5255c7c6349bc1bd1e59e08cd12acbbd63ce649f2588755783aa94dfb6b1a
   - name: enve
     buildsystem: simple
     build-commands:
-      - install enve_bashrc -Dt /usr/lib/sdk/enve
-      - install enve_run -Dt /usr/lib/sdk/enve
-      - install enve_run_dbg -D /usr/lib/sdk/enve
-      - install enve_posix_bash -D /usr/lib/sdk/enve/bin/bash
+      # Install config files
+      - install enve.libsonnet -Dt $FLATPAK_DEST/etc
+      - install enve.jsonnet -Dt $FLATPAK_DEST/etc
+      - install enve_bashrc -Dt $FLATPAK_DEST/etc
+      #
+      - install enve_run -Dt $FLATPAK_DEST/lib
+      - install enve_run_dbg -Dt $FLATPAK_DEST/lib
+      # Install bin files
+      - install enve.py -D $FLATPAK_DEST/bin/enve
+      - install enve_posix_bash -D $FLATPAK_DEST/bin/bash
     sources:
+      - type: file
+        path: enve.py
+      - type: file
+        path: enve.libsonnet
+      - type: file
+        path: enve.jsonnet
       - type: file
         path: enve_bashrc
       - type: script
         dest-filename: enve_run
         commands:
-          - export ENV=/usr/lib/sdk/enve/enve_bashrc
+          - export ENV=/usr/lib/sdk/enve/etc/enve_bashrc
           - source $ENV
           - if [ $# -eq 0 ]; then
           -     sh
@@ -31,7 +78,7 @@ modules:
       - type: script
         dest-filename: enve_run_dbg
         commands:
-          - export ENV=/usr/lib/sdk/enve/enve_bashrc
+          - export ENV=/usr/lib/sdk/enve/etc/enve_bashrc
           - source $ENV
           - if [ $# -ne 0 ]; then
           -     eval $@

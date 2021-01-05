@@ -1,6 +1,18 @@
 #!/usr/bin/python3
 
 import os
+ENVE_ROOT_PATH = '/usr/lib/sdk/enve'
+ENVE_ETC_PATH = os.path.join(ENVE_ROOT_PATH, 'etc')
+ENVE_BIN_PATH = os.path.join(ENVE_ROOT_PATH, 'bin')
+ENVE_LIB_PATH = os.path.join(ENVE_ROOT_PATH, 'lib')
+ENVE_LIBSONNET_PATH = os.path.join(ENVE_ETC_PATH, 'enve.libsonnet')
+ENVE_BASE_CONFIG_PATH = os.path.join(ENVE_ETC_PATH, 'enve.jsonnet')
+ENVE_RUN_PATH = os.path.join(ENVE_LIB_PATH, 'enve_run')
+ENVE_RUN_DBG_PATH = os.path.join(ENVE_LIB_PATH, 'enve_run_dbg')
+
+import site
+site.addsitedir(os.path.join(ENVE_LIB_PATH, 'python3.8/site-packages'))
+
 import re
 import click
 import json
@@ -10,9 +22,6 @@ import logging
 import configparser
 import pprint
 import textwrap
-
-ENVE_LIBSONNET_PATH = '/app/enve.libsonnet'
-ENVE_BASE_CONFIG_PATH = '/app/enve.jsonnet'
 
 def extension_verify_installed(flatpak_extension: dict) -> bool:
     '''Add doc...'''
@@ -196,7 +205,7 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
             cmd.insert(1, config['Application']['command'])
 
             flatpak_spawn_cmd = ['flatpak-spawn', '--host', 'flatpak', 'run',
-                                 '--command=/usr/lib/sdk/enve/enve_run%s' % ('_dbg' if enve_use_debug_shell else ''),
+                                 '--command=%s' % (ENVE_RUN_DBG_PATH if enve_use_debug_shell else ENVE_RUN_PATH),
                                  '--runtime=org.freedesktop.Sdk',
                                  '--filesystem=host',
                                  "--filesystem=/tmp",
@@ -236,10 +245,7 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
         os.environ[enve_var] = enve_vars[enve_var]
 
     # Update the cmd to use the enve_run script for running
-    if enve_use_debug_shell:
-        cmd.insert(0, '/usr/lib/sdk/enve/enve_run_dbg')
-    else:
-        cmd.insert(0, '/usr/lib/sdk/enve/enve_run')
+    cmd.insert(0, ENVE_RUN_DBG_PATH if enve_use_debug_shell else ENVE_RUN_PATH)
 
     # Run the command to copmletion
     logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
@@ -281,10 +287,10 @@ def cli(enve_use_config: str, enve_use_base_config: bool, enve_use_debug_shell: 
         logger.info('Info log level set.')
 
     if enve_use_base_config:
-        errno, enve_vars = [0, {}]
-    else:
-        # Parse the environment configs
-        errno, enve_vars = load_environ_config(enve_use_config)
+        enve_use_config = ENVE_BASE_CONFIG_PATH
+
+    # Parse the environment configs
+    errno, enve_vars = load_environ_config(enve_use_config)
 
     # If no command is specified, start the shell by default
     if not cmd:
