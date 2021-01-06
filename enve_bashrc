@@ -2,7 +2,7 @@
 
 # Exports #
 ###########
-export PS1="\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}\[\e[32;49m\]\n▍\[\e[0m\]\u@\h \[\e[32m\]\[\e[0m\] \W \[\e[32m\]\[\e[0m\] $ "
+export PS1="\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}\[\e[32;49m\]\n\[\e[32m\]▍\[\e[0m\]\u@\h \[\e[32m\]\[\e[0m\] \W \[\e[32m\]\[\e[0m\] $ "
 if [[ $ENVE_PATH ]] && [[ ":$PATH:" != *":$ENVE_PATH:"* ]]; then export PATH=$ENVE_PATH${PATH:+:${PATH}}; fi
 
 # Aliases #

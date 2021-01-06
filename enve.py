@@ -14,6 +14,7 @@ import site
 site.addsitedir(os.path.join(ENVE_LIB_PATH, 'python3.8/site-packages'))
 
 import re
+import collections
 import click
 import json
 import _jsonnet
@@ -251,25 +252,56 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
     logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
     return subprocess.run(cmd).returncode
 
+ENVE_OPTION_PARAM = collections.namedtuple('ENVE_OPTION_PARAM', ['default', 'type'])
+
 # TODO: Add sandbox option
+ENVE_OPTIONS = {
+    'use-config': ENVE_OPTION_PARAM('', click.STRING),
+    'use-verbose': ENVE_OPTION_PARAM('warning', click.Choice(['debug', 'info', 'warning'])),
+    'use-detached': ENVE_OPTION_PARAM(False, click.BOOL),
+    'use-debug-shell': ENVE_OPTION_PARAM(False, click.BOOL),
+}
+# TODO: Clean up help
+# @click.option('--enve-use-config', envvar='ENVE_CONFIG', type=click.Path(exists=True),
+#               help='''Path to the enve configuration file. If not specified, the ENVE_CONFIG environment
+#               variable will first be checked, followed by the "enve.jsonnet" file in the git root directory.''')
+# @click.option('--enve-use-base-config', is_flag=True,
+#               help='''If set, will use the ENVE base config for setting up the environment.''')
+# @click.option('--enve-use-debug-shell', is_flag=True,
+#               help='''Opens a debug shell in the environment before running the commands.''')
+# @click.option('--enve-use-verbose', type=click.Choice(['warning', 'info', 'debug']), default='warning',
+#               help='Set the verbose level. Default is "warning".')
+# @click.option('--enve-enable-detached/--enve-disable-detached', is_flag=True,
+#               help='''Enable/disable a flatpak app from running detached. Note, the detached flatpak app will still
+#               retain ENVE sandbox configuration. The "detachment" is only accomplished from a system process point
+#               of view. Default is disabled.''')
+
+def enve_options_default() -> dict:
+    return dict([(option, ENVE_OPTIONS[option].default) for option in ENVE_OPTIONS])
+
 @click.command(context_settings={"ignore_unknown_options": True})
-@click.option('--enve-use-config', envvar='ENVE_CONFIG', type=click.Path(exists=True),
-              help='''Path to the enve configuration file. If not specified, the ENVE_CONFIG environment
-              variable will first be checked, followed by the "enve.jsonnet" file in the git root directory.''')
-@click.option('--enve-use-base-config', is_flag=True,
-              help='''If set, will use the ENVE base config for setting up the environment.''')
-@click.option('--enve-use-debug-shell', is_flag=True,
-              help='''Opens a debug shell in the environment before running the commands.''')
-@click.option('--enve-use-verbose', type=click.Choice(['warning', 'info', 'debug']), default='warning',
-              help='Set the verbose level. Default is "warning".')
-@click.option('--enve-enable-detached/--enve-disable-detached', is_flag=True,
-              help='''Enable/disable a flatpak app from running detached. Note, the detached flatpak app will still
-              retain ENVE sandbox configuration. The "detachment" is only accomplished from a system process point
-              of view. Default is disabled.''')
-@click.argument('cmd', nargs=-1)
-def cli(enve_use_config: str, enve_use_base_config: bool, enve_use_debug_shell: bool, enve_use_verbose: str,
-        enve_enable_detached: bool, cmd: tuple) -> None:
+@click.option('--ENVE', type=(click.Choice(ENVE_OPTIONS), str), multiple=True)
+@click.argument('shell_cmd', nargs=-1)
+@click.pass_context
+def cli(ctx, shell_cmd: tuple, enve: tuple) -> None:
     '''Add doc...'''
+
+    enve_options = enve_options_default()
+    for opt, value in enve:
+        try:
+            enve_options[opt] = ENVE_OPTIONS[opt].type.convert(value, opt, ctx)
+        except click.exceptions.ClickException as e:
+            print('Error: --ENVE', opt, 'option', e)
+            exit(e.exit_code)
+
+    if enve_options['use-config'].lower() == 'base':
+        enve_options['use-config'] = ENVE_BASE_CONFIG_PATH
+    elif enve_options['use-config']:
+        try:
+            click.Path(exists=True).convert(enve_options['use-config'], 'use-config', ctx)
+        except click.exceptions.ClickException as e:
+            print('Error: --ENVE', opt, 'option', e)
+            exit(e.exit_code)
 
     # Set the logging default level and format
     logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s')
@@ -279,26 +311,23 @@ def cli(enve_use_config: str, enve_use_base_config: bool, enve_use_debug_shell: 
     # Set the default log level
     logger.setLevel(logging.WARNING)
     # Update the logger verbosity level if specified
-    if 'debug' == enve_use_verbose:
+    if 'debug' == enve_options['use-verbose']:
         logger.setLevel(logging.DEBUG)
         logger.info('Debug log level set.')
-    elif 'info' == enve_use_verbose:
+    elif 'info' == enve_options['use-verbose']:
         logger.setLevel(logging.INFO)
         logger.info('Info log level set.')
 
-    if enve_use_base_config:
-        enve_use_config = ENVE_BASE_CONFIG_PATH
-
     # Parse the environment configs
-    errno, enve_vars = load_environ_config(enve_use_config)
+    errno, enve_vars = load_environ_config(enve_options['use-config'])
 
     # If no command is specified, start the shell by default
-    if not cmd:
-        cmd = ('sh',)
+    if not shell_cmd:
+        shell_cmd = ('sh',)
 
-    # Run the requested cmd using ENVE only if the ENVE load was successful
+    # Run the requested shell cmd using ENVE only if the ENVE load was successful
     if errno == 0:
-        errno = run_cmd(list(cmd), enve_vars, enve_use_debug_shell, enve_enable_detached)
+        errno = run_cmd(list(shell_cmd), enve_vars, enve_options['use-debug-shell'], enve_options['use-detached'])
 
     # Exit with error code
     exit(errno)
