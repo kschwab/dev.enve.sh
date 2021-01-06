@@ -2,7 +2,14 @@
 
 # Exports #
 ###########
-export PS1="\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}\[\e[32;49m\]\n\[\e[32m\]▍\[\e[0m\]\u@\h \[\e[32m\]\[\e[0m\] \W \[\e[32m\]\[\e[0m\] $ "
+ENVE_PROMPT="\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}"
+if [[ $ENVE_RUNNING_FLATPAK_APP ]]; then
+    ENVE_PROMPT="$ENVE_PROMPT\[\e[32;47m\]\[\e[30m\]$ENVE_RUNNING_FLATPAK_APP\[\e[37;49m\]"
+else
+    ENVE_PROMPT="$ENVE_PROMPT\[\e[32;49m\]"
+fi
+ENVE_PROMPT="$ENVE_PROMPT\n\[\e[0;32m\]▍\[\e[0m\]\u@\h \[\e[32m\]\[\e[0m\] \W \[\e[32m\]\[\e[0m\] $ "
+export PS1=$ENVE_PROMPT
 if [[ $ENVE_PATH ]] && [[ ":$PATH:" != *":$ENVE_PATH:"* ]]; then export PATH=$ENVE_PATH${PATH:+:${PATH}}; fi
 
 # Aliases #

@@ -50,9 +50,6 @@ modules:
       - install enve.libsonnet -Dt $FLATPAK_DEST/etc
       - install enve.jsonnet -Dt $FLATPAK_DEST/etc
       - install enve_bashrc -Dt $FLATPAK_DEST/etc
-      #
-      - install enve_run -Dt $FLATPAK_DEST/lib
-      - install enve_run_dbg -Dt $FLATPAK_DEST/lib
       # Install bin files
       - install enve.py -D $FLATPAK_DEST/bin/enve
       - install enve_posix_bash -D $FLATPAK_DEST/bin/bash
@@ -65,25 +62,6 @@ modules:
         path: enve.jsonnet
       - type: file
         path: enve_bashrc
-      - type: script
-        dest-filename: enve_run
-        commands:
-          - export ENV=/usr/lib/sdk/enve/etc/enve_bashrc
-          - source $ENV
-          - if [ $# -eq 0 ]; then
-          -     sh
-          - else
-          -     eval $@
-          - fi
-      - type: script
-        dest-filename: enve_run_dbg
-        commands:
-          - export ENV=/usr/lib/sdk/enve/etc/enve_bashrc
-          - source $ENV
-          - if [ $# -ne 0 ]; then
-          -     eval $@
-          - fi
-          - sh
       - type: script
         dest-filename: enve_posix_bash
         commands:

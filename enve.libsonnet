@@ -79,6 +79,9 @@
 
   // List of ENVE flatpak extensions
   extensions: [
-    Enve.NewExtension('enve', variables=[Enve.NewVariable('BIN', 'bin', path_export=true)]),
+    Enve.NewExtension('enve', variables=[
+      Enve.NewVariable('BIN', 'bin', path_export=true),
+      Enve.NewVariable('LIB', 'lib'),
+    ]),
   ],
 }

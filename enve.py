@@ -7,8 +7,8 @@ ENVE_BIN_PATH = os.path.join(ENVE_ROOT_PATH, 'bin')
 ENVE_LIB_PATH = os.path.join(ENVE_ROOT_PATH, 'lib')
 ENVE_LIBSONNET_PATH = os.path.join(ENVE_ETC_PATH, 'enve.libsonnet')
 ENVE_BASE_CONFIG_PATH = os.path.join(ENVE_ETC_PATH, 'enve.jsonnet')
-ENVE_RUN_PATH = os.path.join(ENVE_LIB_PATH, 'enve_run')
-ENVE_RUN_DBG_PATH = os.path.join(ENVE_LIB_PATH, 'enve_run_dbg')
+ENVE_BASHRC_PATH = os.path.join(ENVE_ETC_PATH, 'enve_bashrc')
+ENVE_EXEC_PATH = os.path.join(ENVE_BIN_PATH, 'enve')
 
 import site
 site.addsitedir(os.path.join(ENVE_LIB_PATH, 'python3.8/site-packages'))
@@ -205,11 +205,15 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
             config.read_string(completed_output.stdout)
             cmd.insert(1, config['Application']['command'])
 
+            enve_vars['ENVE_RUNNING_FLATPAK_APP'] = cmd[0]
+
+            if enve_use_debug_shell:
+                cmd += ['--ENVE', 'use-debug-shell', 'true']
+
             flatpak_spawn_cmd = ['flatpak-spawn', '--host', 'flatpak', 'run',
-                                 '--command=%s' % (ENVE_RUN_DBG_PATH if enve_use_debug_shell else ENVE_RUN_PATH),
-                                 '--runtime=org.freedesktop.Sdk',
+                                 '--command=%s' % ENVE_EXEC_PATH,
+                                 '--runtime=%s' % config['Application']['sdk'],
                                  '--filesystem=host',
-                                 "--filesystem=/tmp",
                                  '--socket=session-bus',
                                  '--allow=devel',
                                  '--allow=multiarch',
@@ -238,21 +242,22 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
             logger.warning('Command "%s" suspected as flatpak app but not found.', cmd[0])
             logger.warning('Treating "%s" as regular system command.', cmd[0]) # PROMPT HERE??
 
-    # The command does not appear to be a flatpak app, so we'll just run the command here locally without spawning a new
-    # flatpak session.
+    # Set the posix shell "ENV" path to point to the ENVE bashrc
+    os.environ['ENV'] = ENVE_BASHRC_PATH
 
     # Export the ENVE variables into the current environment
     for enve_var in enve_vars:
         os.environ[enve_var] = enve_vars[enve_var]
 
-    # Update the cmd to use the enve_run script for running
-    cmd.insert(0, ENVE_RUN_DBG_PATH if enve_use_debug_shell else ENVE_RUN_PATH)
-
     # Run the command to copmletion
     logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
-    return subprocess.run(cmd).returncode
+    if not enve_use_debug_shell:
+        return subprocess.run(['/bin/sh', '-c'] + cmd).returncode
+    else:
+        subprocess.run(['/bin/sh', '-c'] + cmd)
+        return subprocess.run(['/bin/sh', '-c', 'sh']).returncode
 
-ENVE_OPTION_PARAM = collections.namedtuple('ENVE_OPTION_PARAM', ['default', 'type'])
+ENVE_OPTION_PARAM = collections.namedtuple('ENVE_OPTION_PARAM', ['default', 'click_type'])
 
 # TODO: Add sandbox option
 ENVE_OPTIONS = {
@@ -289,7 +294,7 @@ def cli(ctx, shell_cmd: tuple, enve: tuple) -> None:
     enve_options = enve_options_default()
     for opt, value in enve:
         try:
-            enve_options[opt] = ENVE_OPTIONS[opt].type.convert(value, opt, ctx)
+            enve_options[opt] = ENVE_OPTIONS[opt].click_type.convert(value, opt, ctx)
         except click.exceptions.ClickException as e:
             print('Error: --ENVE', opt, 'option', e)
             exit(e.exit_code)
