@@ -1,19 +1,34 @@
 #!/usr/bin/python3
 
+# TODO: Add option for enve auto switching in jsonnet config - disabled, prompt, enabled
+# TODO: We can skip doing work if already in the shell and the command is not a flatpak app... just simply pass it
+# through or eval it... (ie, this is the runtime enve switching)
+
+# TODO: Add jsonnet option for specifying build spec for extension (for install fail)
+# TODO: Add sandbox option
+# TODO: Look at switching extension/variable configs into object instead of list for explicit overriding (or, add an
+# option that says to use the last extension specified)
+# TODO: Clean up help
+
+# TODO: Work on a way for developer to have own local config
+
 import os
+ENVE_FLATPAK_APP_ID = 'dev.enve.sh'
 ENVE_ROOT_PATH = '/usr/lib/sdk/enve'
 ENVE_ETC_PATH = os.path.join(ENVE_ROOT_PATH, 'etc')
-ENVE_BIN_PATH = os.path.join(ENVE_ROOT_PATH, 'bin')
 ENVE_LIB_PATH = os.path.join(ENVE_ROOT_PATH, 'lib')
+ENVE_SRC_PATH = os.path.join(ENVE_ROOT_PATH, 'src')
 ENVE_LIBSONNET_PATH = os.path.join(ENVE_ETC_PATH, 'enve.libsonnet')
 ENVE_BASE_CONFIG_PATH = os.path.join(ENVE_ETC_PATH, 'enve.jsonnet')
 ENVE_BASHRC_PATH = os.path.join(ENVE_ETC_PATH, 'enve_bashrc')
-ENVE_EXEC_PATH = os.path.join(ENVE_BIN_PATH, 'enve')
+ENVE_PY_PATH = os.path.join(ENVE_SRC_PATH, 'enve.py')
+ENVE_RUN_CMD_PATH = os.path.join(ENVE_SRC_PATH, 'enve_run_cmd')
 
 import site
 site.addsitedir(os.path.join(ENVE_LIB_PATH, 'python3.8/site-packages'))
 
 import re
+import pty
 import collections
 import click
 import json
@@ -23,6 +38,25 @@ import logging
 import configparser
 import pprint
 import textwrap
+
+def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
+    '''Add doc...'''
+
+    heavy_seperator, light_seperator = ['▌','┆'] if enve_options['use-basic-prompt'] else ['', '']
+    enve_prompt = r'\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}'
+
+    if 'FLATPAK_ID' in os.environ and os.environ['FLATPAK_ID'] != ENVE_FLATPAK_APP_ID:
+        enve_prompt += \
+            r'\[\e[32;47m\]%s\[\e[30m\]$FLATPAK_ID\[\e[37;49m\]%s' % \
+            (heavy_seperator, heavy_seperator)
+    else:
+        enve_prompt += r'\[\e[32;49m\]%s' % heavy_seperator
+
+    enve_prompt += \
+        r'\n\[\e[0;32m\]▍\[\e[0m\]\u@\h \[\e[32m\]%s\[\e[0m\] \W \[\e[32m\]%s\[\e[0m\] $ ' % \
+        (light_seperator, light_seperator)
+
+    enve_vars['ENVE_PROMPT'] = enve_prompt
 
 def extension_verify_installed(flatpak_extension: dict) -> bool:
     '''Add doc...'''
@@ -122,13 +156,15 @@ def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', ex
             else:
                 enve_vars[variable_name] = value
 
-def load_environ_config(enve_config: str) -> [int, dict]:
+def load_enve_config(enve_options: dict) -> [int, dict]:
     '''Add doc...'''
 
     # Initialize the ENVE variables dictionary
     enve_vars = { }
     # Get the logger instance
     logger = logging.getLogger(__name__)
+
+    enve_config = enve_options['use-config']
 
     # If the enve_config file is not specified via the command line or environment variable, check to see if it
     # exists in git root directory (if we're in a git repo).
@@ -180,11 +216,13 @@ def load_environ_config(enve_config: str) -> [int, dict]:
         add_variables(enve_vars, flatpak_extension['variables'], flatpak_extension['id_alias'],
                       flatpak_extension['path'])
 
+    add_enve_prompt_variable(enve_vars, enve_options)
+
     logger.debug('ENVE Variables:\n%s', textwrap.indent(pprint.pformat(enve_vars), '  '))
 
     return 0, enve_vars
 
-def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_detached: bool) -> int:
+def run_cmd(cmd: list, enve_vars: dict, enve_options: dict) -> int:
     '''Add doc...'''
 
     # Get the logger instance
@@ -205,84 +243,82 @@ def run_cmd(cmd: list, enve_vars: dict, enve_use_debug_shell: bool, enve_enable_
             config.read_string(completed_output.stdout)
             cmd.insert(1, config['Application']['command'])
 
-            enve_vars['ENVE_RUNNING_FLATPAK_APP'] = cmd[0]
+            for option in enve_options:
+                cmd += ['--ENVE', str(option), str(enve_options[option])]
 
-            if enve_use_debug_shell:
-                cmd += ['--ENVE', 'use-debug-shell', 'true']
-
-            flatpak_spawn_cmd = ['flatpak-spawn', '--host', 'flatpak', 'run',
-                                 '--command=%s' % ENVE_EXEC_PATH,
+            flatpak_spawn_cmd = ['flatpak-spawn', '--host', '--watch-bus', 'flatpak', 'run',
+                                 '--command=%s' % ENVE_PY_PATH,
                                  '--runtime=%s' % config['Application']['sdk'],
                                  '--filesystem=host',
                                  '--socket=session-bus',
                                  '--allow=devel',
                                  '--allow=multiarch',
                                  '--share=network',
-                                 '--device=all'] + \
-                                 ['--env=%s=%s' % (enve_var, enve_vars[enve_var]) for enve_var in enve_vars]
+                                 '--device=all',
+                                 '--env=TERM=%s' % os.environ['TERM']]
 
-            flatpak_spawn_cmd += ['--parent-pid=%d' % os.getpid(), '--die-with-parent'] if not enve_enable_detached else []
-
-            logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
-
-            # Run the app using flatpak-spawn under the host system
-            if enve_enable_detached:
-                if enve_use_debug_shell:
-                    logger.warning('Cannot run detached when debug shell is enabled. Disabling flatpak app detachment.')
-                else:
-                    # When running detached we have to use the subprocess.Popen method in order to gain access to the
-                    # start_new_session flag
-                    subprocess.Popen(flatpak_spawn_cmd + cmd, start_new_session=True)
-                    return 0
+            logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
 
             # Run the command to completion
             return subprocess.run(flatpak_spawn_cmd + cmd).returncode
         else:
             # Log a warning about using suspected flatpak command as regular system command
             logger.warning('Command "%s" suspected as flatpak app but not found.', cmd[0])
-            logger.warning('Treating "%s" as regular system command.', cmd[0]) # PROMPT HERE??
-
-    # Set the posix shell "ENV" path to point to the ENVE bashrc
-    os.environ['ENV'] = ENVE_BASHRC_PATH
+            logger.warning('Treating "%s" as regular system command.', cmd[0])
+            # TODO: PROMPT HERE??
 
     # Export the ENVE variables into the current environment
     for enve_var in enve_vars:
         os.environ[enve_var] = enve_vars[enve_var]
 
-    # Run the command to copmletion
-    logger.debug('Exec Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
-    if not enve_use_debug_shell:
-        return subprocess.run(['/bin/sh', '-c'] + cmd).returncode
-    else:
-        subprocess.run(['/bin/sh', '-c'] + cmd)
-        return subprocess.run(['/bin/sh', '-c', 'sh']).returncode
+    if (not enve_options['use-debug-shell']) or click.confirm('Debug shell enabled. Run command "%s"?' % ' '.join(cmd)):
 
-ENVE_OPTION_PARAM = collections.namedtuple('ENVE_OPTION_PARAM', ['default', 'click_type'])
+        # Run the command to completion
+        logger.debug('Run Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
+        errno = subprocess.run([ENVE_RUN_CMD_PATH] + cmd).returncode
 
-# TODO: Add sandbox option
-ENVE_OPTIONS = {
-    'use-config': ENVE_OPTION_PARAM('', click.STRING),
-    'use-verbose': ENVE_OPTION_PARAM('warning', click.Choice(['debug', 'info', 'warning'])),
-    'use-detached': ENVE_OPTION_PARAM(False, click.BOOL),
-    'use-debug-shell': ENVE_OPTION_PARAM(False, click.BOOL),
-}
-# TODO: Clean up help
-# @click.option('--enve-use-config', envvar='ENVE_CONFIG', type=click.Path(exists=True),
-#               help='''Path to the enve configuration file. If not specified, the ENVE_CONFIG environment
-#               variable will first be checked, followed by the "enve.jsonnet" file in the git root directory.''')
-# @click.option('--enve-use-base-config', is_flag=True,
-#               help='''If set, will use the ENVE base config for setting up the environment.''')
-# @click.option('--enve-use-debug-shell', is_flag=True,
-#               help='''Opens a debug shell in the environment before running the commands.''')
-# @click.option('--enve-use-verbose', type=click.Choice(['warning', 'info', 'debug']), default='warning',
-#               help='Set the verbose level. Default is "warning".')
-# @click.option('--enve-enable-detached/--enve-disable-detached', is_flag=True,
-#               help='''Enable/disable a flatpak app from running detached. Note, the detached flatpak app will still
-#               retain ENVE sandbox configuration. The "detachment" is only accomplished from a system process point
-#               of view. Default is disabled.''')
+    if enve_options['use-debug-shell']:
+        errno = pty.spawn(ENVE_RUN_CMD_PATH)
+
+    return errno
 
 def enve_options_default() -> dict:
+    '''Add doc...'''
+
     return dict([(option, ENVE_OPTIONS[option].default) for option in ENVE_OPTIONS])
+
+ENVE_OPTION_PARAM = collections.namedtuple('ENVE_OPTION_PARAM', ['default', 'click_type', 'help'])
+ENVE_OPTIONS = {
+    'use-config': ENVE_OPTION_PARAM(
+        'base', click.STRING,
+        '''Path to the enve configuration file. If not specified, the ENVE_CONFIG environment variable will first be
+        checked, followed by the "enve.jsonnet" file in the git root directory.
+        ... If set, will use the ENVE base config for setting up the environment.'''
+    ),
+
+    'use-verbose': ENVE_OPTION_PARAM(
+        'warning', click.Choice(['debug', 'info', 'warning']),
+        '''Set the verbose level. Default is "warning".'''
+    ),
+
+    'use-debug-shell': ENVE_OPTION_PARAM(
+        False, click.BOOL,
+        '''Opens a debug shell in the environment after running the commands.'''
+    ),
+
+    # TODOS...
+    'use-basic-prompt': ENVE_OPTION_PARAM(
+        False, click.BOOL, ''
+    ),
+
+    'use-auto-switch': ENVE_OPTION_PARAM(
+        False, click.BOOL, '' # We can prompt on first switch, or make a custom type
+    ),
+
+    'use-sandbox': ENVE_OPTION_PARAM(
+        False, click.BOOL, ''
+    )
+}
 
 @click.command(context_settings={"ignore_unknown_options": True})
 @click.option('--ENVE', type=(click.Choice(ENVE_OPTIONS), str), multiple=True)
@@ -301,7 +337,10 @@ def cli(ctx, shell_cmd: tuple, enve: tuple) -> None:
 
     if enve_options['use-config'].lower() == 'base':
         enve_options['use-config'] = ENVE_BASE_CONFIG_PATH
-    elif enve_options['use-config']:
+    elif not enve_options['use-config'] and 'ENVE_CONFIG' in os.environ:
+        enve_options['use-config'] = os.environ['ENVE_CONFIG']
+
+    if enve_options['use-config']:
         try:
             click.Path(exists=True).convert(enve_options['use-config'], 'use-config', ctx)
         except click.exceptions.ClickException as e:
@@ -323,8 +362,8 @@ def cli(ctx, shell_cmd: tuple, enve: tuple) -> None:
         logger.setLevel(logging.INFO)
         logger.info('Info log level set.')
 
-    # Parse the environment configs
-    errno, enve_vars = load_environ_config(enve_options['use-config'])
+    # Parse the ENVE config
+    errno, enve_vars = load_enve_config(enve_options)
 
     # If no command is specified, start the shell by default
     if not shell_cmd:
@@ -332,13 +371,10 @@ def cli(ctx, shell_cmd: tuple, enve: tuple) -> None:
 
     # Run the requested shell cmd using ENVE only if the ENVE load was successful
     if errno == 0:
-        errno = run_cmd(list(shell_cmd), enve_vars, enve_options['use-debug-shell'], enve_options['use-detached'])
+        errno = run_cmd(list(shell_cmd), enve_vars, enve_options)
 
     # Exit with error code
     exit(errno)
 
 if __name__ == '__main__':
     cli(prog_name=os.environ['FLATPAK_ID'])
-
-
-# TODO: We can skip doing work if already in the shell and the command is not a flatpak app... just simply pass it through or eval it...

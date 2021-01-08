@@ -50,9 +50,16 @@ modules:
       - install enve.libsonnet -Dt $FLATPAK_DEST/etc
       - install enve.jsonnet -Dt $FLATPAK_DEST/etc
       - install enve_bashrc -Dt $FLATPAK_DEST/etc
+      # Install src files
+      - install enve.py -Dt $FLATPAK_DEST/src
+      - install enve_run_cmd -Dt $FLATPAK_DEST/src
+      - install enve_bash -D $FLATPAK_DEST/src
+      - install enve_sh -D $FLATPAK_DEST/src
       # Install bin files
-      - install enve.py -D $FLATPAK_DEST/bin/enve
-      - install enve_posix_bash -D $FLATPAK_DEST/bin/bash
+      - install -d $FLATPAK_DEST/bin
+      - ln -s $FLATPAK_DEST/src/enve.py $FLATPAK_DEST/bin/enve
+      - ln -s $FLATPAK_DEST/src/enve_bash $FLATPAK_DEST/bin/bash
+      - ln -s $FLATPAK_DEST/src/enve_sh $FLATPAK_DEST/bin/sh
     sources:
       - type: file
         path: enve.py
@@ -63,6 +70,21 @@ modules:
       - type: file
         path: enve_bashrc
       - type: script
-        dest-filename: enve_posix_bash
+        dest-filename: enve_run_cmd
         commands:
-          - /bin/bash --posix $@
+          - export ENV=/usr/lib/sdk/enve/etc/enve_bashrc
+          - export BASH_ENV=$ENV
+          - source $ENV
+          - if [ $# -eq 0 ]; then
+          -     sh
+          - else
+          -     eval $@
+          - fi
+      - type: script
+        dest-filename: enve_bash
+        commands:
+          - /bin/bash --posix --noprofile $@
+      - type: script
+        dest-filename: enve_sh
+        commands:
+          - /bin/sh --noprofile $@
