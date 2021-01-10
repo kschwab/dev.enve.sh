@@ -75,16 +75,12 @@ modules:
           - export ENV=/usr/lib/sdk/enve/etc/enve_bashrc
           - export BASH_ENV=$ENV
           - source $ENV
-          - if [ $# -eq 0 ]; then
-          -     sh
-          - else
-          -     eval $@
-          - fi
+          - eval $@
       - type: script
         dest-filename: enve_bash
         commands:
-          - /bin/bash --posix --noprofile $@
+          - exec /bin/bash --posix --noprofile $@
       - type: script
         dest-filename: enve_sh
         commands:
-          - /bin/sh --noprofile $@
+          - exec /bin/sh --noprofile $@
