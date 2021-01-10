@@ -52,6 +52,7 @@ modules:
       - install enve_bashrc -Dt $FLATPAK_DEST/etc
       # Install src files
       - install enve.py -Dt $FLATPAK_DEST/src
+      - install pty2.py -Dt $FLATPAK_DEST/src
       - install enve_run_cmd -Dt $FLATPAK_DEST/src
       - install enve_bash -D $FLATPAK_DEST/src
       - install enve_sh -D $FLATPAK_DEST/src
@@ -63,6 +64,8 @@ modules:
     sources:
       - type: file
         path: enve.py
+      - type: file
+        path: pty2.py
       - type: file
         path: enve.libsonnet
       - type: file

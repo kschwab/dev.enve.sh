@@ -1,13 +1,15 @@
 #!/usr/bin/python3
 
-# TODO: Add jsonnet option for specifying build spec for extension (for install fail)
+# TODO: Fix prompt wrap issue
 # TODO: Add sandbox option
-# TODO: Add jsonnet sandbox banner option
+# TODO: Add jsonnet banner option
 # TODO: Look at switching extension/variable configs into object instead of list for explicit overriding (or, add an
 # option that says to use the last extension specified)
 # TODO: Clean up help
 
 # TODO: Work on a way for developer to have own local config
+# TODO: Fix pty resize (Should be resolved with https://bugs.python.org/issue41818) pty2 lifted from
+# https://github.com/python/cpython/pull/21752/files in interim
 
 import os
 ENVE_FLATPAK_APP_ID = 'dev.enve.sh'
@@ -25,7 +27,7 @@ import site
 site.addsitedir(os.path.join(ENVE_LIB_PATH, 'python3.8/site-packages'))
 
 import re
-import pty
+import pty2
 import collections
 import click
 import json
@@ -329,10 +331,10 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
         # Run the command to completion
         logger.debug('Run Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
-        errno = pty.spawn([ENVE_RUN_CMD_PATH] + cmd)
+        errno = pty2.wspawn([ENVE_RUN_CMD_PATH] + cmd)
 
     if enve_options['use-debug-shell']:
-        errno = pty.spawn([ENVE_RUN_CMD_PATH, 'sh'])
+        errno = pty2.wspawn([ENVE_RUN_CMD_PATH, 'sh'])
 
     exit(errno)
 
