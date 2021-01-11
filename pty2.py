@@ -203,7 +203,9 @@ def _winresz(pty_slave):
     """Resize window."""
     w = struct.pack('HHHH', 0, 0, 0, 0)
     s = fcntl.ioctl(STDIN_FILENO, termios.TIOCGWINSZ, w)
-    fcntl.ioctl(pty_slave, termios.TIOCSWINSZ, s)
+    p = fcntl.ioctl(pty_slave, termios.TIOCGWINSZ, w)
+    if s != p:
+        fcntl.ioctl(pty_slave, termios.TIOCSWINSZ, s)
 
 def _create_hwinch(pty_slave):
     """Creates SIGWINCH handler."""
@@ -214,7 +216,7 @@ def _create_hwinch(pty_slave):
             pass
     return _hwinch
 
-def _cleanup(master_fd, slave_fd, old_hwinch, tty_mode):
+def _cleanup(master_fd, slave_fd, tty_mode):
     """Performs cleanup in wspawn."""
 
     # Close both pty ends.
@@ -224,12 +226,6 @@ def _cleanup(master_fd, slave_fd, old_hwinch, tty_mode):
     # Restore original tty attributes.
     if tty_mode != None:
         tty.tcsetattr(STDIN_FILENO, tty.TCSAFLUSH, tty_mode)
-
-    # Restore original SIGWINCH signal handler.
-    try:
-        signal.signal(SIGWINCH, old_hwinch)
-    except:
-        pass
 
 def _ekill(child_pid):
     """Kill spawned process due to exception."""
@@ -244,11 +240,12 @@ def _ekill(child_pid):
     except:
         pass
 
-def _wcopy(master_fd, child_pid, master_read=_read, stdin_read=_read, timeout=0.01):
+def _wcopy(master_fd, slave_fd, child_pid, master_read=_read, stdin_read=_read, timeout=0.01):
     """Parent copy loop for wspawn."""
     fds = [master_fd, STDIN_FILENO]
     ret = (0,0)
     while True:
+        _winresz(slave_fd)
         rfds, wfds, xfds = select(fds, [], [], timeout)
         if ret == (0,0):
             ret = os.waitpid(child_pid, os.WNOHANG)
@@ -274,13 +271,11 @@ def wspawn(argv, master_read=_read, stdin_read=_read, timeout=0.01):
     if type(argv) == type(''):
         argv = (argv,)
     sys.audit('pty.wspawn', argv)
-    bk_hwinch = signal.getsignal(SIGWINCH)
     master_fd, slave_fd = openpty()
     try:
         _winresz(slave_fd)
-        signal.signal(SIGWINCH, _create_hwinch(slave_fd))
     except:     # User should handle exception and try spawn instead.
-        _cleanup(master_fd, slave_fd, bk_hwinch, None)
+        _cleanup(master_fd, slave_fd, None)
         raise
     pid = os.fork()
     if pid == CHILD:
@@ -292,11 +287,11 @@ def wspawn(argv, master_read=_read, stdin_read=_read, timeout=0.01):
     except tty.error:    # This is the same as termios.error
         mode = None
     try:
-        ret = _wcopy(master_fd, pid, master_read, stdin_read, timeout)[1]
+        ret = _wcopy(master_fd, slave_fd, pid, master_read, stdin_read, timeout)[1]
     except:
         _ekill(pid)
-        _cleanup(master_fd, slave_fd, bk_hwinch, mode)
+        _cleanup(master_fd, slave_fd, mode)
         raise
 
-    _cleanup(master_fd, slave_fd, bk_hwinch, mode)
+    _cleanup(master_fd, slave_fd, mode)
     return ret

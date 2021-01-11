@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-# TODO: Fix prompt wrap issue
 # TODO: Add sandbox option
 # TODO: Add jsonnet banner option
 # TODO: Look at switching extension/variable configs into object instead of list for explicit overriding (or, add an
@@ -8,8 +7,7 @@
 # TODO: Clean up help
 
 # TODO: Work on a way for developer to have own local config
-# TODO: Fix pty resize (Should be resolved with https://bugs.python.org/issue41818) pty2 lifted from
-# https://github.com/python/cpython/pull/21752/files in interim
+# Note: pty2 lifted and modified from https://github.com/python/cpython/pull/21752/files
 
 import os
 ENVE_FLATPAK_APP_ID = 'dev.enve.sh'
@@ -137,7 +135,7 @@ def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', ex
     for variable in variables:
         values = variable['values']
         if variable['values_are_paths'] and extension_path:
-            values = [os.path.join(extension_path, value) for value in values]
+            values = [os.path.join(extension_path, value).rstrip('/') for value in values]
 
         value = variable['delimiter'].join(values) if len(values) > 1 else values[0]
 
@@ -234,6 +232,9 @@ def load_enve_config(enve_options: dict) -> dict:
 
 def load_cmd_metadata(cmd: list) -> configparser.ConfigParser:
     '''Add doc...'''
+
+    # Get the logger instance
+    logger = logging.getLogger(__name__)
 
     cmd_metadata = configparser.ConfigParser()
 
