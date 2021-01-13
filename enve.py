@@ -153,7 +153,7 @@ def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', ex
             else:
                 enve_vars[variable_name] = value
 
-def load_enve_config(enve_options: dict) -> dict:
+def load_enve_config(enve_options: dict) -> None:
     '''Add doc...'''
 
     # Initialize the ENVE variables dictionary
@@ -228,7 +228,16 @@ def load_enve_config(enve_options: dict) -> dict:
 
     logger.debug('ENVE Variables:\n%s', textwrap.indent(pprint.pformat(enve_vars), '  '))
 
-    return enve_vars
+    # Ensure that all enve_vars are prefixed with 'ENVE_'
+    bad_enve_vars = [enve_var for enve_var in enve_vars if 'ENVE_' != enve_var[:len('ENVE_')]]
+    if bad_enve_vars:
+        for bad_enve_var in bad_enve_vars:
+            logger.error('ENVE variable not prefixed with "ENVE_": %s', bad_enve_var)
+        exit(1)
+
+    # Export the ENVE variables into the current environment
+    for enve_var in enve_vars:
+        os.environ[enve_var] = enve_vars[enve_var]
 
 def load_cmd_metadata(cmd: list) -> configparser.ConfigParser:
     '''Add doc...'''
@@ -293,7 +302,7 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
         # Run the command to completion
         exit(subprocess.run(flatpak_spawn_cmd + cmd).returncode)
 
-    elif enve_options['use-config'] != '' and 'ENVE_ID' in os.environ:
+    elif 'ENVE_ID' in os.environ:
         # If we're not running a flatpak app, the ENVE use-config option has been specified, and we're currently in an
         # ENVE shell, then pass the command through to flatpak-spawn to ensure correct isolation of the requested
         # environment. We could do more complicated diffing between the current ENVE environment and the requested,
@@ -312,21 +321,9 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
         # Run the command to completion
         exit(subprocess.run(flatpak_spawn_cmd + cmd).returncode)
 
-    elif 'ENVE_ID' not in os.environ:
-
-        # Parse the ENVE config
-        enve_vars = load_enve_config(enve_options)
-
-        # Ensure that all enve_vars are prefixed with 'ENVE_'
-        bad_enve_vars = [enve_var for enve_var in enve_vars if 'ENVE_' != enve_var[:len('ENVE_')]]
-        if bad_enve_vars:
-            for bad_enve_var in bad_enve_vars:
-                logger.error('ENVE variable not prefixed with "ENVE_": %s', bad_enve_var)
-            exit(1)
-
-        # Export the ENVE variables into the current environment
-        for enve_var in enve_vars:
-            os.environ[enve_var] = enve_vars[enve_var]
+    else:
+        # Load the ENVE config
+        load_enve_config(enve_options)
 
     if (not enve_options['use-debug-shell']) or click.confirm('Debug shell enabled. Run command "%s"?' % ' '.join(cmd)):
 
