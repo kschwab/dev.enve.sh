@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+# TODO: Add cowsay?
+# TODO: Add exec spawn if we install/update a package at load
 # TODO: Add sandbox option
 # TODO: Add jsonnet banner option
 # TODO: Look at switching extension/variable configs into object instead of list for explicit overriding (or, add an
@@ -19,7 +21,7 @@ ENVE_LIBSONNET_PATH = os.path.join(ENVE_ETC_PATH, 'enve.libsonnet')
 ENVE_BASE_CONFIG_PATH = os.path.join(ENVE_ETC_PATH, 'enve.jsonnet')
 ENVE_BASHRC_PATH = os.path.join(ENVE_ETC_PATH, 'enve_bashrc')
 ENVE_PY_PATH = os.path.join(ENVE_SRC_PATH, 'enve.py')
-ENVE_RUN_CMD_PATH = os.path.join(ENVE_SRC_PATH, 'enve_run_cmd')
+ENVE_RUN_CMD_PATH = os.path.join(ENVE_SRC_PATH, 'enve_run_cmd.sh')
 
 import site
 site.addsitedir(os.path.join(ENVE_LIB_PATH, 'python3.8/site-packages'))
@@ -68,8 +70,9 @@ def extension_verify_installed(flatpak_extension: dict) -> bool:
         logger.warning('%s extension missing, installing...', flatpak_extension['id'])
 
         # The extension is missing, so attempt to install. A return code of 0 means it installed successfully.
-        completed_output = subprocess.run(['flatpak-spawn', '--host', 'flatpak', 'install', '--user',
-                                           flatpak_extension['flatpak']], capture_output=True, text=True)
+        completed_output = subprocess.run(['flatpak-spawn', '--host', 'flatpak', 'install', '--user', '--assumeyes',
+                                           flatpak_extension['remote_name'], flatpak_extension['flatpak']],
+                                          capture_output=True, text=True)
         if completed_output.returncode != 0:
             # The installation of the extension failed, meaning we can't load the specified environment and will
             # have to abort.
@@ -329,7 +332,10 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
         # Run the command to completion
         logger.debug('Run Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
-        errno = pty2.wspawn([ENVE_RUN_CMD_PATH] + cmd)
+        if os.path.basename(cmd[0]) in ['sh', 'bash']:
+            errno = pty2.wspawn([ENVE_RUN_CMD_PATH] + cmd)
+        else:
+            errno = subprocess.run([ENVE_RUN_CMD_PATH] + cmd).returncode
 
     if enve_options['use-debug-shell']:
         errno = pty2.wspawn([ENVE_RUN_CMD_PATH, 'sh'])

@@ -53,7 +53,7 @@ modules:
       # Install src files
       - install enve.py -Dt $FLATPAK_DEST/src
       - install pty2.py -Dt $FLATPAK_DEST/src
-      - install enve_run_cmd -Dt $FLATPAK_DEST/src
+      - install enve_run_cmd.sh -Dt $FLATPAK_DEST/src
       - install enve_bash -D $FLATPAK_DEST/src
       - install enve_sh -D $FLATPAK_DEST/src
       # Install bin files
@@ -72,13 +72,8 @@ modules:
         path: enve.jsonnet
       - type: file
         path: enve_bashrc
-      - type: script
-        dest-filename: enve_run_cmd
-        commands:
-          - export ENV=/usr/lib/sdk/enve/etc/enve_bashrc
-          - export BASH_ENV=$ENV
-          - source $ENV
-          - eval $@
+      - type: file
+        path: enve_run_cmd.sh
       - type: script
         dest-filename: enve_bash
         commands:

@@ -14,3 +14,4 @@ finish-args:
   - --allow=devel
   - --allow=multiarch
   - --share=network
+  - --device=all
