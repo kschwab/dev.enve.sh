@@ -37,6 +37,7 @@ import logging
 import configparser
 import pprint
 import textwrap
+import psutil
 
 def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
     '''Add doc...'''
@@ -44,7 +45,7 @@ def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
     heavy_seperator, light_seperator = ['▌','┆'] if enve_options['use-basic-prompt'] else ['', '']
     enve_prompt = r'\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}'
 
-    if 'FLATPAK_ID' in os.environ and os.environ['FLATPAK_ID'] != ENVE_FLATPAK_APP_ID:
+    if os.environ.get('FLATPAK_ID') == ENVE_FLATPAK_APP_ID:
         enve_prompt += \
             r'\[\e[32;47m\]%s\[\e[30m\]$FLATPAK_ID\[\e[37;49m\]%s' % \
             (heavy_seperator, heavy_seperator)
@@ -298,7 +299,7 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
                              '--allow=multiarch',
                              '--share=network',
                              '--device=all',
-                             '--env=TERM=%s' % os.environ['TERM']]
+                             '--env=TERM=%s' % os.environ.get('TERM')]
 
         logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
 
@@ -317,7 +318,7 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
         # Note we pass the TERM environment variable here to ensure if colors are supported they show up in the new
         # shell
-        flatpak_spawn_cmd = ['flatpak-spawn', '--env=TERM=%s' % os.environ['TERM'], ENVE_PY_PATH]
+        flatpak_spawn_cmd = ['flatpak-spawn', '--env=TERM=%s' % os.environ.get('TERM'), ENVE_PY_PATH]
 
         logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
 
@@ -332,13 +333,17 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
         # Run the command to completion
         logger.debug('Run Command:\n%s', textwrap.indent(pprint.pformat(cmd), '  '))
-        if os.path.basename(cmd[0]) in ['sh', 'bash']:
+
+        if psutil.Process().terminal() == None:
             errno = pty2.wspawn([ENVE_RUN_CMD_PATH] + cmd)
         else:
             errno = subprocess.run([ENVE_RUN_CMD_PATH] + cmd).returncode
 
     if enve_options['use-debug-shell']:
-        errno = pty2.wspawn([ENVE_RUN_CMD_PATH, 'sh'])
+        if psutil.Process().terminal() == None:
+            errno = pty2.wspawn([ENVE_RUN_CMD_PATH, 'sh'])
+        else:
+            errno = subprocess.run([ENVE_RUN_CMD_PATH, 'sh']).returncode
 
     exit(errno)
 
@@ -420,4 +425,4 @@ def cli(ctx, cmd: tuple, enve: tuple) -> None:
     run_cmd(cmd, enve_options)
 
 if __name__ == '__main__':
-    cli(prog_name=os.environ['FLATPAK_ID'])
+    cli(prog_name=os.environ.get('FLATPAK_ID'))
