@@ -44,7 +44,10 @@ def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
     '''Add doc...'''
 
     heavy_seperator, light_seperator = ['▌','┆'] if enve_options['use-basic-prompt'].value() else ['', '']
-    enve_prompt = r'\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}'
+    enve_prompt = r'$(status="$(sha256sum $ENVE_CURRENT_CONFIG | cut -d " " -f 1)"; '
+    enve_prompt += r'[[ "$ENVE_CURRENT_CONFIG_SHA_256" = "$status" ]] || '
+    enve_prompt += r'echo "\[\e[30;41m\]Modified\[\e[31;42m\]%s")' % heavy_seperator
+    enve_prompt += r'\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}'
 
     if os.environ.get('FLATPAK_ID') != ENVE_FLATPAK_APP_ID:
         enve_prompt += \
@@ -58,6 +61,17 @@ def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
         (light_seperator, light_seperator)
 
     enve_vars['ENVE_PROMPT'] = enve_prompt
+
+def add_enve_current_config_variables(enve_vars: dict, enve_options: dict) -> None:
+    '''Add doc...'''
+
+    enve_vars['ENVE_CURRENT_CONFIG'] = enve_options['use-config'].value()
+    completed_output = subprocess.run(['sha256sum', enve_options['use-config'].value()], capture_output=True, text=True)
+    if completed_output.returncode != 0:
+        logger.error('Failure computing sha256sum for %s', enve_options['use-config'].value())
+        exit(completed_output.returncode)
+
+    enve_vars['ENVE_CURRENT_CONFIG_SHA_256'] = completed_output.stdout.split()[0]
 
 def extension_verify_installed(flatpak_extension: dict) -> bool:
     '''Add doc...'''
@@ -204,6 +218,9 @@ def load_enve_config(enve_options: dict) -> None:
 
     # Add the ENVE prompt variable
     add_enve_prompt_variable(enve_vars, enve_options)
+
+    # Add the ENVE current config variables
+    add_enve_current_config_variables(enve_vars, enve_options)
 
     # Ensure all the specified flatpak extensions are installed with the right commit versions if specified.
     for flatpak_extension in reversed(enve_json['extensions']):
