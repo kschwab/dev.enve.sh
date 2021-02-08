@@ -60,13 +60,14 @@ modules:
       - install enve_bashrc -Dt $FLATPAK_DEST/etc
       # Install src files
       - install enve.py -Dt $FLATPAK_DEST/src
+      - install enve_motd.py -Dt $FLATPAK_DEST/src
       - install pty2.py -Dt $FLATPAK_DEST/src
-      - install enve_run_cmd.sh -Dt $FLATPAK_DEST/src
       - install enve_bash -D $FLATPAK_DEST/src
       - install enve_sh -D $FLATPAK_DEST/src
       # Install bin files
       - install -d $FLATPAK_DEST/bin
       - ln -s $FLATPAK_DEST/src/enve.py $FLATPAK_DEST/bin/enve
+      - ln -s $FLATPAK_DEST/src/enve_motd.py $FLATPAK_DEST/bin/motd
       - ln -s $FLATPAK_DEST/src/enve_bash $FLATPAK_DEST/bin/bash
       - ln -s $FLATPAK_DEST/src/enve_sh $FLATPAK_DEST/bin/sh
     sources:
@@ -81,7 +82,7 @@ modules:
       - type: file
         path: enve_bashrc
       - type: file
-        path: enve_run_cmd.sh
+        path: enve_motd.py
       - type: script
         dest-filename: enve_bash
         commands:

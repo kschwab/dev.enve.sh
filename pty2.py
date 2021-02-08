@@ -203,8 +203,7 @@ def _winresz(pty_slave):
     """Resize window."""
     w = struct.pack('HHHH', 0, 0, 0, 0)
     s = fcntl.ioctl(STDIN_FILENO, termios.TIOCGWINSZ, w)
-    p = fcntl.ioctl(pty_slave, termios.TIOCGWINSZ, w)
-    if s != p:
+    if s != fcntl.ioctl(pty_slave, termios.TIOCGWINSZ, w):
         fcntl.ioctl(pty_slave, termios.TIOCSWINSZ, s)
 
 def _create_hwinch(pty_slave):
