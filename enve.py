@@ -2,6 +2,8 @@
 
 # TODO: We will need to run checks and installation before flatpak-spawn of command
 # TODO: Add sandbox option
+# TODO: Flatpak spawn flag --expose-pids seems to have a bug (internal to flatpak) on certain platforms. Add back in
+#       once resolved.
 # TODO: Look at switching extension/variable configs into object instead of list for explicit overriding (or, add an
 #       option that says to use the last extension specified)
 # TODO: Clean up help
@@ -180,18 +182,16 @@ def load_enve_config(enve_options: dict) -> None:
     if not enve_options['use-config'].value() and os.environ.get('ENVE_CONFIG'):
         enve_options['use-config'].update_value(os.environ.get('ENVE_CONFIG'))
 
-    # If the enve_config file is not specified via the command line or environment variable, check to see if it
-    # exists in git root directory (if we're in a git repo).
-    if not enve_options['use-config'].value():
-
-        # Get the git root directory, where a return code of zero means we're not in a git repo.
-        completed_output = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
-        if completed_output.returncode == 0:
-
-            # Check to see if the enve_config.jsonnet file exists in the git root directory.
-            git_root_path_enve_config = os.path.join(completed_output.stdout.strip(), 'enve.jsonnet')
-            if os.path.exists(git_root_path_enve_config):
-                enve_options['use-config'].update_value(git_root_path_enve_config)
+    # If the enve_config file is not specified via the command line or environment variable, search upwards from the
+    # current directory to check if config file exists.
+    search_directory = os.path.abspath('.')
+    while not enve_options['use-config'].value():
+        if os.path.exists(os.path.join(search_directory, 'enve.jsonnet')):
+            enve_options['use-config'].update_value(os.path.abspath(os.path.join(search_directory, 'enve.jsonnet')))
+        elif not os.path.samefile('/', search_directory):
+            search_directory = os.path.dirname(search_directory)
+        else:
+            break
 
     # If no enve_config file was specified, prompt user on how to proceed
     if not enve_options['use-config'].value():
@@ -346,7 +346,7 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
         # Note we pass the TERM environment variable here to ensure if colors are supported they show up in the new
         # shell
-        flatpak_spawn_cmd = ['flatpak-spawn', '--watch-bus', '--expose-pids',
+        flatpak_spawn_cmd = ['flatpak-spawn', '--watch-bus',
                              '--env=TERM=%s' % os.environ.get('TERM'), ENVE_PY_PATH]
 
         logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
