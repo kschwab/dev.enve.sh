@@ -63,13 +63,14 @@
   // Template function for flatpak extension objects
   NewExtension(id, id_alias='', commit='', extension_base_name=$['runtime'].default_extension_base_name,
   extension_mount_point=$['runtime'].default_extension_mount_point, remote_name=$['runtime'].default_remote_name,
-  variables=[]):: {
+  http_proxy='', variables=[]):: {
     assert std.isString(id): 'Extension ID must be a string.',
     assert std.isString(id_alias): id + ' alias must be a string when specified.',
     assert std.isString(commit): id + ' commit must be a string when specified.',
     assert std.isString(extension_base_name): 'Extension base name must be a string.',
     assert std.isString(extension_mount_point): 'Extension mount point must be a string.',
     assert std.isString(remote_name): 'Extension remote name must be a string.',
+    assert std.isString(http_proxy): 'Extension http_proxy must be a string.',
     assert std.isArray(variables): 'Extension variables must be an array of Enve.NewVariables.',
 
     id: id,
@@ -78,6 +79,7 @@
     path: extension_mount_point + '/' + id,
     flatpak: extension_base_name + '.' + id + '/' + $['runtime'].arch + '/' + $['runtime'].branch,
     remote_name: remote_name,
+    http_proxy: http_proxy,
     variables: variables,
   },
 
