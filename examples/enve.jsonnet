@@ -2,16 +2,12 @@ local Enve = import 'enve.libsonnet';
 
 {
   Enve: Enve {
-    id+: Enve.NewId('Project', 'X.Y.Z'),
+    id+: Enve.NewId('Hello World', 'X.Y.Z'),
     extensions+: [
-      Enve.NewExtension('gcc-4_8_5', 'gcc',
+      Enve.NewExtension('Hello_World',
         variables=[
-          Enve.NewVariable('BIN', 'bin', path_export=true)
+          Enve.NewVariable('BIN', path_export=true)
         ]),
-      // Enve.NewExtension('dummy-4_8_5'),
     ],
-    // variables+: [
-    //   Enve.NewVariable('PATH', ['bin'], auto_load=true),
-    // ],
   },
 }

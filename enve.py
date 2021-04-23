@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 
-# TODO: We will need to run checks and installation before flatpak-spawn of command
+# TODO: We will need to run checks and installation before flatpak-spawn of command - done, needs verification
+# TODO: Add option to use system vs user flatpak, with default set to user - done, needs verification
 # TODO: Work on a way for developer to have own local config
-# TODO: Add option to use system vs user flatpak, with default set to user
 # TODO: Add sandbox option
 # TODO: Flatpak spawn flag --expose-pids seems to have a bug (internal to flatpak) on certain platforms. Add back in
 #       once resolved.
@@ -52,7 +52,7 @@ def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
     enve_prompt += r'echo "\[\e[30;41m\]Modified\[\e[31;42m\]%s")' % heavy_seperator
     enve_prompt += r'\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}'
 
-    if os.environ.get('FLATPAK_ID') != ENVE_FLATPAK_APP_ID:
+    if os.environ.get('FLATPAK_ID', None) != ENVE_FLATPAK_APP_ID:
         enve_prompt += \
             r'\[\e[32;47m\]%s\[\e[30m\]$FLATPAK_ID\[\e[37;49m\]%s' % \
             (heavy_seperator, heavy_seperator)
@@ -76,84 +76,102 @@ def add_enve_current_config_variables(enve_vars: dict, enve_options: dict) -> No
 
     enve_vars['ENVE_CURRENT_CONFIG_SHA_256'] = completed_output.stdout.split()[0]
 
-def extension_verify_installed(flatpak_extension: dict) -> bool:
+def get_flatpak_spawn_cmd(flatpak_spawn_cmd_args: list=[], is_host_cmd: bool=True) -> list:
+    '''Add doc...'''
+
+    flatpak_spawn_cmd = ['flatpak-spawn']
+    flatpak_spawn_cmd += [] if not is_host_cmd else ['--host']
+    if 'FLATPAK_USER_DIR' in os.environ:
+        flatpak_spawn_cmd += ['--env=FLATPAK_USER_DIR=%s' % os.environ['FLATPAK_USER_DIR']]
+
+    logger.debug('Flatpak Spawn Command:\n%s',
+                 textwrap.indent(pprint.pformat(flatpak_spawn_cmd + flatpak_spawn_cmd_args), '  '))
+
+    return flatpak_spawn_cmd + flatpak_spawn_cmd_args
+
+def get_flatpak_cmd(enve_options: dict, flatpak_cmd_args: list=[]) -> list:
+    '''Add doc...'''
+
+    flatpak_cmd = ['flatpak']
+    if not enve_options['use-system-flatpak'].value():
+        flatpak_cmd += ['--user']
+
+    return flatpak_cmd + flatpak_cmd_args
+
+def extension_verify_installed(flatpak_extension: dict) -> dict:
     '''Add doc...'''
 
     # Get the logger instance
     logger = logging.getLogger(__name__)
 
-    # Create the flatpak-spawn command
-    flatpak_user_dir = os.environ.get('FLATPAK_USER_DIR', os.path.join(os.environ.get('XDG_DATA_HOME'), 'flatpak'))
-    flatpak_spawn_cmd = ['flatpak-spawn', '--host', '--env=FLATPAK_USER_DIR=%s' % flatpak_user_dir]
+    verify_results = {'is_installed': True, 'is_new_install': False}
 
     # We have to run flatpak commands in the host environment. A return code of 0 from flatpak info indicates
     # the extension is installed.
-    cmd = ['flatpak', '--user', 'info', flatpak_extension['flatpak']]
-    logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
-    if subprocess.run(flatpak_spawn_cmd + cmd, capture_output=True).returncode != 0:
+    flatpak_spawn_cmd = get_flatpak_spawn_cmd(get_flatpak_cmd(enve_options, ['info', flatpak_extension['flatpak']]))
+    if subprocess.run(flatpak_spawn_cmd, capture_output=True).returncode != 0:
         logger.warning('%s extension missing, installing...', flatpak_extension['id'])
 
-        # Set the extension http_proxy
-        flatpak_spawn_cmd += ['--env=http_proxy=%s' % flatpak_extension.get('http_proxy')]
-
         # The extension is missing, so attempt to install. A return code of 0 means it installed successfully.
-        cmd = ['flatpak', '--user', 'install', '--assumeyes', flatpak_extension['remote_name'],
-               flatpak_extension['flatpak']]
-        logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
-
-        if subprocess.run(flatpak_spawn_cmd + cmd).returncode != 0:
+        flatpak_cmd_args = ['install', '--assumeyes', flatpak_extension['remote_name'], flatpak_extension['flatpak']]
+        flatpak_spawn_cmd_args = \
+            [] if flatpak_extension['proxy'] == '' else ['--env=%s' % flatpak_extension['proxy']] + \
+            get_flatpak_cmd(enve_options, flatpak_cmd_args)
+        if subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
             # The installation of the extension failed, meaning we can't load the specified environment and will
             # have to abort.
             logger.error('%s extension install failed.', flatpak_extension['id'])
-            return False
+            verify_results['is_installed'] = False
+            return verify_results
 
         logger.info('%s extension install succeeded.', flatpak_extension['id'])
+        verify_results['is_new_install'] = True
 
-    return True
+    return verify_results
 
-def extension_verify_commit(flatpak_extension: dict) -> bool:
+def extension_verify_commit(flatpak_extension: dict) -> dict:
     '''Add doc...'''
 
     # Get the logger instance
     logger = logging.getLogger(__name__)
 
-    # Create the flatpak-spawn command
-    flatpak_user_dir = os.environ.get('FLATPAK_USER_DIR', os.path.join(os.environ.get('XDG_DATA_HOME'), 'flatpak'))
-    flatpak_spawn_cmd = ['flatpak-spawn', '--host', '--env=FLATPAK_USER_DIR=%s' % flatpak_user_dir]
+    verify_results = {'is_installed': True, 'is_new_install': False}
 
     # Verify the installed flatpak extension matches the commit SHA if specified.
     if flatpak_extension['commit'] != '':
 
         # Get the flatpak extension commit SHA
-        cmd = ['flatpak', '--user', 'info', '--show-commit']
-        logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
-        completed_output = subprocess.run(flatpak_spawn_cmd + cmd, capture_output=True, text=True)
+        flatpak_spawn_cmd = get_flatpak_spawn_cmd(get_flatpak_cmd(enve_options, ['info', '--show-commit']))
+        completed_output = subprocess.run(flatpak_spawn_cmd, capture_output=True, text=True)
         # We already verified the extension is installed earlier, so expect the flatpak query to succeed.
         if completed_output.returncode != 0:
             logger.error('Unable to get info for %s:\n%s', flatpak_extension['id'],
                          textwrap.indent(completed_output.stderr, '  '))
-            return False
+            verify_results['is_installed'] = False
+            return verify_results
 
         # If the commit SHA does not match the currently installed commit SHA, update the installed flatpak to
         # the specified commit SHA.
         if flatpak_extension['commit'] != completed_output.stdout.strip()[:len(flatpak_extension['commit'])]:
             logger.warning('%s installed commit mismatch, updating...', flatpak_extension['id'])
 
-            # Set the extension http_proxy
-            flatpak_spawn_cmd += ['--env=http_proxy=%s' % flatpak_extension.get('http_proxy')]
-
             # Update the installed flatpak to the specified commit SHA
-            cmd = ['flatpak', '--user', 'update', '--commit=', flatpak_extension['commit'], flatpak_extension['flatpak']]
-            logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
-            if subprocess.run(flatpak_spawn_cmd + cmd).returncode != 0:
+            flatpak_cmd_args = \
+                ['update', '--commit=', flatpak_extension['commit'], flatpak_extension['flatpak']]
+            flatpak_spawn_cmd_args = \
+                [] if flatpak_extension['proxy'] == '' else ['--env=%s' % flatpak_extension['proxy']] + \
+                get_flatpak_cmd(enve_options, flatpak_cmd_args)
+            if subprocess.run(flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
                 # The update of the extension failed, meaning we can't load the specified environment and will
                 # have to abort loading the environment.
                 logger.error('%s extension update failed.', flatpak_extension['id'])
-                return False
+                verify_results['is_installed'] = False
+                return verify_results
 
             logger.info('%s extension install succeeded.', flatpak_extension['id'])
+            verify_results['is_new_install'] = True
 
-    return True
+    return verify_results
 
 def import_callback(dir_path: str, filename:str) -> [str, str]:
     '''Add doc...'''
@@ -189,7 +207,7 @@ def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', ex
             else:
                 enve_vars[variable_name] = value
 
-def load_enve_config(enve_options: dict) -> None:
+def load_enve_config(enve_options: dict) -> dict:
     '''Add doc...'''
 
     # Initialize the ENVE variables dictionary
@@ -197,9 +215,14 @@ def load_enve_config(enve_options: dict) -> None:
     # Get the logger instance
     logger = logging.getLogger(__name__)
 
+    load_results = {'is_new_environment': 'ENVE_ID' not in os.environ, 'num_new_extensions_installed': 0}
+
+    if load_results['is_new_environment'] == False:
+        return load_results
+
     # If the enve_config file is not specified via the command line, first check to see if environment variable is set.
-    if not enve_options['use-config'].value() and os.environ.get('ENVE_CONFIG'):
-        enve_options['use-config'].update_value(os.environ.get('ENVE_CONFIG'))
+    if not enve_options['use-config'].value() and 'ENVE_CONFIG' in os.environ:
+        enve_options['use-config'].update_value(os.environ['ENVE_CONFIG'])
 
     # If the enve_config file is not specified via the command line or environment variable, search upwards from the
     # current directory to check if config file exists.
@@ -248,14 +271,20 @@ def load_enve_config(enve_options: dict) -> None:
                      textwrap.indent(pprint.pformat(flatpak_extension), '  '))
 
         # Verify the extension is installed, and attempt to install if not found
-        if not extension_verify_installed(flatpak_extension):
+        verify_installed_results = extension_verify_installed(flatpak_extension)
+        if not verify_installed_results['is_installed']:
             logger.error('ENVE load failed.')
             exit(1)
+        if verify_installed_results['is_new_install']:
+            load_results['num_new_extensions_installed'] += 1
 
         # Verify the extension commit matches the specified, and attempt to update if SHAs mismatch
-        if not extension_verify_commit(flatpak_extension):
+        verify_commit_results = extension_verify_commit(flatpak_extension)
+        if not verify_commit_results['is_installed']:
             logger.error('ENVE load failed.')
             exit(1)
+        if verify_commit_results['is_new_install']:
+            load_results['num_new_extensions_installed'] += 1
 
         # Add the extension load directory paths to the load directories dictionary
         add_variables(enve_vars, flatpak_extension['variables'], flatpak_extension['id_alias'],
@@ -276,25 +305,21 @@ def load_enve_config(enve_options: dict) -> None:
 
     os.environ['ENV'] = ENVE_BASHRC_PATH
     os.environ['BASH_ENV'] = ENVE_BASHRC_PATH
+    return load_results
 
-def load_cmd_metadata(cmd: list) -> configparser.ConfigParser:
+def load_cmd_metadata(cmd: list, enve_options: dict) -> configparser.ConfigParser:
     '''Add doc...'''
 
     # Get the logger instance
     logger = logging.getLogger(__name__)
-
-    # Create the flatpak-spawn command
-    flatpak_user_dir = os.environ.get('FLATPAK_USER_DIR', os.path.join(os.environ.get('XDG_DATA_HOME'), 'flatpak'))
-    flatpak_spawn_cmd = ['flatpak-spawn', '--host', '--env=FLATPAK_USER_DIR=%s' % flatpak_user_dir]
 
     cmd_metadata = configparser.ConfigParser()
 
     # Metadata only exists if the command is a flatpak app
     if re.match('\w+\.\w+\.\w+', cmd[0]):
         # Attempt to get the flatpak metadata information
-        cmd = ['flatpak', '--user', 'info', '--show-metadata', cmd[0]]
-        logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
-        completed_output = subprocess.run(flatpak_spawn_cmd + cmd, capture_output=True, text=True)
+        flatpak_spawn_cmd_args = get_flatpak_cmd(enve_options, ['info', '--show-metadata', cmd[0]])
+        completed_output = subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args), capture_output=True, text=True)
 
         # If we're successful with getting the flatpak metadata information, then proceed with running the flatpak app
         # using flatpak-spawn.
@@ -319,7 +344,7 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
     # Load the command meta data if the command is a flatpak app. If the command is not a flatpak app,
     # cmd_metadata.sections() will be [], indicating nothing was loaded or found for the supplied command.
-    cmd_metadata = load_cmd_metadata(cmd)
+    cmd_metadata = load_cmd_metadata(cmd, enve_options)
 
     if cmd_metadata.sections():
         # Grab the actual flatpak app command and use it as the command to run enve.py in the spawned environment
@@ -334,27 +359,30 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
         if not enve_options['use-interactive'].was_passed():
             cmd += ['--ENVE', 'use-interactive', 't']
 
-        flatpak_spawn_cmd = ['flatpak-spawn', '--host', '--watch-bus', 'flatpak', '--user', 'run',
-                             '--command=%s' % ENVE_PY_PATH,
-                             '--runtime=%s' % cmd_metadata['Application']['sdk'],
-                             '--filesystem=host',
-                             '--socket=session-bus',
-                             '--allow=devel',
-                             '--allow=multiarch',
-                             '--share=network',
-                             '--device=all',
-                             '--env=TERM=%s' % os.environ.get('TERM')]
-
-        logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
+        flatpak_cmd_args = \
+            ['run',
+             '--command=%s' % ENVE_PY_PATH,
+             '--runtime=%s' % cmd_metadata['Application']['sdk'],
+             '--filesystem=host',
+             '--socket=session-bus',
+             '--allow=devel',
+             '--allow=multiarch',
+             '--share=network',
+             '--device=all',
+             '--env=TERM=%s' % os.environ.get('TERM', '')] + cmd
+        flatpak_spawn_cmd_args = ['--watch-bus'] + get_flatpak_cmd(enve_options, flatpak_cmd_args)
 
         # Run the command to completion
-        exit(subprocess.run(flatpak_spawn_cmd + cmd).returncode)
+        exit(subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode)
 
-    elif 'ENVE_ID' in os.environ:
-        # If we're not running a flatpak app, the ENVE use-config option has been specified, and we're currently in an
-        # ENVE shell, then pass the command through to flatpak-spawn to ensure correct isolation of the requested
-        # environment. We could do more complicated diffing between the current ENVE environment and the requested,
-        # however this would require a complex diff for what should be a corner case.
+    # Load the ENVE config
+    load_results = load_enve_config(enve_options)
+
+    # If we're not running a flatpak app and we're currently in an ENVE shell, then pass the command through to
+    # flatpak-spawn to ensure correct isolation of the requested environment. We could do more complicated diffing
+    # between the current ENVE environment and the requested, however this would require a complex diff for what should
+    # be a corner case.
+    if load_results['is_new_environment'] == False or load_results['num_new_extensions_installed'] > 0:
 
         # Pass the ENVE options through to the spawned command
         for option in enve_options:
@@ -370,17 +398,10 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
         # Note we pass the TERM environment variable here to ensure if colors are supported they show up in the new
         # shell
-        flatpak_spawn_cmd = ['flatpak-spawn', '--watch-bus',
-                             '--env=TERM=%s' % os.environ.get('TERM'), ENVE_PY_PATH]
-
-        logger.debug('Spawn Command:\n%s', textwrap.indent(pprint.pformat(flatpak_spawn_cmd + cmd), '  '))
+        flatpak_spawn_cmd_args = ['--watch-bus', '--env=TERM=%s' % os.environ.get('TERM', ''), ENVE_PY_PATH] + cmd
 
         # Run the command to completion
-        exit(subprocess.run(flatpak_spawn_cmd + cmd).returncode)
-
-    else:
-        # Load the ENVE config
-        load_enve_config(enve_options)
+        exit(subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args, is_host_cmd=False)).returncode)
 
     cmd_str = ' '.join(cmd)
 
@@ -485,9 +506,13 @@ ENVE_OPTIONS = (
                '''Add doc.'''
     ),
 
-    EnveOption('use-sandbox', False, click.BOOL,
+    EnveOption('use-system-flatpak', False, click.BOOL,
                '''Add doc.'''
-    )
+    ),
+
+    # EnveOption('use-sandbox', False, click.BOOL,
+    #            '''Add doc.'''
+    # )
 )
 
 @click.command(context_settings={"ignore_unknown_options": True})
