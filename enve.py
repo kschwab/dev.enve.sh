@@ -268,11 +268,6 @@ def load_enve_config(enve_options: dict) -> dict:
         # If no enve_config was specified and we're not in an existing environment, log an error and exit.
         logger.error('Unable to locate ENVE config.')
         exit(1)
-    else:
-        # If no enve_config is specified but we're in an existing environment, continue to use the current ENVE shell
-        # environment.
-        logger.debug('Load Results: %s' % load_results)
-        return load_results
 
     # Add the ENVE global variables
     add_variables(enve_vars, enve_json['variables'])
