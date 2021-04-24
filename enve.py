@@ -50,7 +50,7 @@ def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
     enve_prompt += r'echo "\[\e[30;41m\]Modified\[\e[31;42m\]%s")' % heavy_seperator
     enve_prompt += r'\[\e[30;42m\]📦$ENVE_ID${ENVE_ID_VER:+ ${ENVE_ID_VER}}'
 
-    if os.environ.get('FLATPAK_ID', None) != ENVE_FLATPAK_APP_ID:
+    if os.environ['FLATPAK_ID'] != ENVE_FLATPAK_APP_ID:
         enve_prompt += \
             r'\[\e[32;47m\]%s\[\e[30m\]$FLATPAK_ID\[\e[37;49m\]%s' % \
             (heavy_seperator, heavy_seperator)
@@ -245,30 +245,25 @@ def load_enve_config(enve_options: dict) -> dict:
         else:
             break
 
-    # If no enve_config file was specified, and we're not in an existing ENVE shell, prompt user on how to proceed
-    if not enve_options['use-config'].value() and 'ENVE_ID' not in os.environ:
+    # If no enve_config file was specified, prompt user on how to proceed
+    if not enve_options['use-config'].value():
         if click.confirm('Unable to locate ENVE config. Use the base environment?', default=True):
             enve_options['use-config'].update_value(ENVE_BASE_CONFIG_PATH)
         else:
             logger.error('Unable to locate ENVE config.')
             exit(1)
 
-    if enve_options['use-config'].value():
-        # If the ENVE config path does not exist, exit with error
-        if not os.path.exists(enve_options['use-config'].value()):
-            logger.error('ENVE config path does not exist: %s', enve_options['use-config'].value())
-            exit(1)
+    # If the ENVE config path does not exist, exit with error
+    if not os.path.exists(enve_options['use-config'].value()):
+        logger.error('ENVE config path does not exist: %s', enve_options['use-config'].value())
+        exit(1)
 
-        # Jsonnet will validate the content for us and assert if anything is invalid.
-        try:
-            enve_json = json.loads(_jsonnet.evaluate_file(
-                enve_options['use-config'].value(), import_callback=import_callback))['Enve']
-        except Exception as err:
-            logger.exception('Failed to load ENVE config "%s".', enve_options['use-config'].value())
-            exit(1)
-    elif 'ENVE_ID' not in os.environ:
-        # If no enve_config was specified and we're not in an existing environment, log an error and exit.
-        logger.error('Unable to locate ENVE config.')
+    # Jsonnet will validate the content for us and assert if anything is invalid.
+    try:
+        enve_json = json.loads(_jsonnet.evaluate_file(
+            enve_options['use-config'].value(), import_callback=import_callback))['Enve']
+    except Exception as err:
+        logger.exception('Failed to load ENVE config "%s".', enve_options['use-config'].value())
         exit(1)
 
     # Add the ENVE global variables
@@ -385,14 +380,28 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
     # cmd_metadata.sections() will be [], indicating nothing was loaded or found for the supplied command.
     cmd_metadata = load_cmd_metadata(cmd, enve_options)
 
-    if cmd_metadata.sections():
-        # Grab the actual flatpak app command and use it as the command to run enve.py in the spawned environment
-        cmd.insert(1, cmd_metadata['Application']['command'])
+    # Use flatpak-spawn if a new enve shell is needed for the config
+    if cmd_metadata.sections() != [] or load_results['is_new_enve_shell_needed'] == True:
+
+        # If we weren't passed a flatpak app as a command, grab the command meta data from the current flatpak ID.
+        if not cmd_metadata.sections():
+            cmd_metadata = load_cmd_metadata([os.environ['FLATPAK_ID']], enve_options)
+            # Use the flatpak app as the primary command, and supply the desired command as the argument to pass into
+            # enve.py when the new environment is spawned.
+            cmd.insert(0, os.environ['FLATPAK_ID'])
+        else:
+            # Use the flatpak app internal command as the argument to pass into enve.py when the new environment is
+            # spawned.
+            cmd.insert(1, cmd_metadata['Application']['command'])
 
         # Pass the ENVE options through to the spawned command
         for option in enve_options:
             if enve_options[option].was_passed():
                 cmd += ['--ENVE', str(option), str(enve_options[option].value())]
+
+        # Take care of setting the use-config param if it wasn't passed so we don't double prompt the user.
+        if not enve_options['use-config'].was_passed():
+            cmd += ['--ENVE', 'use-config', enve_options['use-config'].value()]
 
         # Always ensure the use-interactive flag is passed when using flatpak-spawn
         if not enve_options['use-interactive'].was_passed():
@@ -414,30 +423,6 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
 
         # Run the command to completion
         exit(subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode)
-
-    # Use flatpak-spawn if a new enve shell is needed for the config
-    if load_results['is_new_enve_shell_needed'] == True:
-
-        # Pass the ENVE options through to the spawned command
-        for option in enve_options:
-            if enve_options[option].was_passed():
-                cmd += ['--ENVE', str(option), str(enve_options[option].value())]
-
-        # Always ensure the use-interactive flag is passed when using flatpak-spawn
-        if not enve_options['use-interactive'].was_passed():
-            if cmd[0] in ['sh', 'bash']:
-                cmd += ['--ENVE', 'use-interactive', 't']
-            else:
-                cmd += ['--ENVE', 'use-interactive', 'f']
-
-        # Note we pass the TERM environment variable here to ensure if colors are supported they show up in the new
-        # shell
-        flatpak_spawn_cmd_args = ['--watch-bus',
-                                  '--env=ENVE_SHELL_DEPTH=%s' % str(int(os.environ['ENVE_SHELL_DEPTH']) + 1),
-                                  '--env=TERM=%s' % os.environ.get('TERM', ''), ENVE_PY_PATH] + cmd
-
-        # Run the command to completion
-        exit(subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args, is_host_cmd=False)).returncode)
 
     cmd_str = ' '.join(cmd)
 
