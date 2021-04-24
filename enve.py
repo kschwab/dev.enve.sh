@@ -77,7 +77,9 @@ def add_enve_current_config_variables(enve_vars: dict, enve_options: dict) -> No
 def add_enve_shell_depth_variable(enve_vars: dict, enve_options: dict) -> None:
     '''Add doc...'''
 
-    enve_vars['ENVE_SHELL_DEPTH'] = os.environ.get('ENVE_SHELL_DEPTH', '0')
+    if 'ENVE_SHELL_DEPTH' not in os.environ:
+        os.environ['ENVE_SHELL_DEPTH'] = '0'
+    enve_vars['ENVE_SHELL_DEPTH'] = os.environ['ENVE_SHELL_DEPTH']
 
 def get_flatpak_spawn_cmd(flatpak_spawn_cmd_args: list=[], is_host_cmd: bool=True) -> list:
     '''Add doc...'''
