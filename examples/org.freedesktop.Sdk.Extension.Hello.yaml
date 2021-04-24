@@ -1,5 +1,5 @@
 build-extension: true
-id: org.freedesktop.Sdk.Extension.Hello_World
+id: org.freedesktop.Sdk.Extension.Hello
 branch: '20.08'
 runtime: org.freedesktop.Sdk
 runtime-version: '20.08'
@@ -8,13 +8,13 @@ separate-locales: false
 appstream-compose: false
 
 modules:
-  - name: Hello_World
-    buildsystem: hello_world
+  - name: Hello
+    buildsystem: simple
     build-commands:
-      - chmod a+x hello_world
-      - install hello_world $FLATPAK_DEST
+      - chmod a+x hello
+      - install hello $FLATPAK_DEST
     sources:
       - type: script
-        dest-filename: hello_world
+        dest-filename: hello
         commands:
           - printf "Hello World!\n"

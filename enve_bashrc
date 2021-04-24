@@ -5,7 +5,6 @@ set -o posix
 # Exports #
 ###########
 export PS1=$ENVE_PROMPT
-if [[ $ENVE_PATH ]] && [[ ":$PATH:" != *":$ENVE_PATH:"* ]]; then export PATH=$ENVE_PATH${PATH:+:${PATH}}; fi
 
 # Aliases #
 ###########
