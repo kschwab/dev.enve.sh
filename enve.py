@@ -1,12 +1,10 @@
 #!/usr/bin/python3
 
 # TODO: Work on a way for developer to have own local config
+# TODO: Clean up help
 # TODO: Add sandbox option
-# TODO: Flatpak spawn flag --expose-pids seems to have a bug (internal to flatpak) on certain platforms. Add back in
-#       once resolved.
 # TODO: Look at switching extension/variable configs into object instead of list for explicit overriding (or, add an
 #       option that says to use the last extension specified)
-# TODO: Clean up help
 
 # NOTE: pty2 lifted and modified from https://github.com/python/cpython/pull/21752/files
 
@@ -77,9 +75,24 @@ def add_enve_current_config_variables(enve_vars: dict, enve_options: dict) -> No
 def add_enve_shell_depth_variable(enve_vars: dict, enve_options: dict) -> None:
     '''Add doc...'''
 
+    # Get the logger instance
+    logger = logging.getLogger(__name__)
+
     if 'ENVE_SHELL_DEPTH' not in os.environ:
         os.environ['ENVE_SHELL_DEPTH'] = '0'
+    elif enve_options['update-install'].value() == True:
+        logger.error('ENVE "update install" cannot be called from within ENVE container.')
+        exit(1)
+
     enve_vars['ENVE_SHELL_DEPTH'] = os.environ['ENVE_SHELL_DEPTH']
+
+def add_enve_flatpak_installation_variable(enve_vars: dict, enve_options: dict) -> None:
+    '''Add doc...'''
+
+    if enve_options['use-flatpak-installation'].was_passed() == False and 'ENVE_FLATPAK_INSTALLATION' in os.environ:
+        enve_options['use-flatpak-installation'].update_value(os.environ['ENVE_FLATPAK_INSTALLATION'])
+
+    enve_vars['ENVE_FLATPAK_INSTALLATION'] = enve_options['use-flatpak-installation'].value()
 
 def get_flatpak_spawn_cmd(flatpak_spawn_cmd_args: list=[], is_host_cmd: bool=True) -> list:
     '''Add doc...'''
@@ -101,12 +114,14 @@ def get_flatpak_cmd(enve_options: dict, flatpak_cmd_args: list=[]) -> list:
     '''Add doc...'''
 
     flatpak_cmd = ['flatpak']
-    if not enve_options['use-system-flatpak'].value():
-        flatpak_cmd += ['--user']
+    if enve_options['use-flatpak-installation'].value() in ['user', 'system']:
+        flatpak_cmd += ['--%s' % enve_options['use-flatpak-installation'].value()]
+    else:
+        flatpak_cmd += ['--installation=%s' % enve_options['use-flatpak-installation'].value()]
 
     return flatpak_cmd + flatpak_cmd_args
 
-def extension_verify_installed(enve_options: dict, flatpak_extension: dict) -> dict:
+def extension_verify_installed(enve_vars: dict, enve_options: dict, flatpak_extension: dict) -> dict:
     '''Add doc...'''
 
     # Get the logger instance
@@ -120,10 +135,14 @@ def extension_verify_installed(enve_options: dict, flatpak_extension: dict) -> d
     if subprocess.run(flatpak_spawn_cmd, capture_output=True).returncode != 0:
         logger.warning('%s extension missing, installing...', flatpak_extension['id'])
 
+        # Extract any proxy variables passed as we will need internet access for extension installation
+        enve_proxy_vars = \
+            ['--env=%s=%s' % (enve_var, enve_vars[enve_var]) \
+             for enve_var in enve_vars if re.search('^(https?|ftp|no)_proxy$', enve_var, re.IGNORECASE)]
+
         # The extension is missing, so attempt to install. A return code of 0 means it installed successfully.
         flatpak_cmd_args = ['install', '--assumeyes', flatpak_extension['remote_name'], flatpak_extension['flatpak']]
-        flatpak_spawn_cmd_args = [] if flatpak_extension['proxy'] == '' else ['--env=%s' % flatpak_extension['proxy']]
-        flatpak_spawn_cmd_args += get_flatpak_cmd(enve_options, flatpak_cmd_args)
+        flatpak_spawn_cmd_args = enve_proxy_vars + get_flatpak_cmd(enve_options, flatpak_cmd_args)
         if subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
             # The installation of the extension failed, meaning we can't load the specified environment and will
             # have to abort.
@@ -138,7 +157,7 @@ def extension_verify_installed(enve_options: dict, flatpak_extension: dict) -> d
     logger.debug('Verify Installed Results: %s' % verify_results)
     return verify_results
 
-def extension_verify_commit(enve_options: dict, flatpak_extension: dict) -> dict:
+def extension_verify_commit(enve_vars: dict, enve_options: dict, flatpak_extension: dict) -> dict:
     '''Add doc...'''
 
     # Get the logger instance
@@ -146,11 +165,14 @@ def extension_verify_commit(enve_options: dict, flatpak_extension: dict) -> dict
 
     verify_results = {'is_installed': True, 'is_new_install': False}
 
+    is_commit_installed = flatpak_extension['commit'] == ''
+
     # Verify the installed flatpak extension matches the commit SHA if specified.
-    if flatpak_extension['commit'] != '':
+    if is_commit_installed == False:
 
         # Get the flatpak extension commit SHA
-        flatpak_spawn_cmd = get_flatpak_spawn_cmd(get_flatpak_cmd(enve_options, ['info', '--show-commit']))
+        flatpak_spawn_cmd = get_flatpak_spawn_cmd(get_flatpak_cmd(enve_options, ['info', '--show-commit',
+                                                                                 flatpak_extension['flatpak']]))
         completed_output = subprocess.run(flatpak_spawn_cmd, capture_output=True, text=True)
         # We already verified the extension is installed earlier, so expect the flatpak query to succeed.
         if completed_output.returncode != 0:
@@ -162,24 +184,36 @@ def extension_verify_commit(enve_options: dict, flatpak_extension: dict) -> dict
 
         # If the commit SHA does not match the currently installed commit SHA, update the installed flatpak to
         # the specified commit SHA.
-        if flatpak_extension['commit'] != completed_output.stdout.strip()[:len(flatpak_extension['commit'])]:
-            logger.warning('%s installed commit mismatch, updating...', flatpak_extension['id'])
+        is_commit_installed = \
+            flatpak_extension['commit'] == completed_output.stdout.strip()[:len(flatpak_extension['commit'])]
 
-            # Update the installed flatpak to the specified commit SHA
-            flatpak_cmd_args = \
-                ['update', '--commit=', flatpak_extension['commit'], flatpak_extension['flatpak']]
-            flatpak_spawn_cmd_args = [] if flatpak_extension['proxy'] == '' else ['--env=%s' % flatpak_extension['proxy']]
-            flatpak_spawn_cmd_args += get_flatpak_cmd(enve_options, flatpak_cmd_args)
-            if subprocess.run(flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
-                # The update of the extension failed, meaning we can't load the specified environment and will
-                # have to abort loading the environment.
-                logger.error('%s extension update failed.', flatpak_extension['id'])
-                verify_results['is_installed'] = False
-                logger.debug('Verify Commit Results: %s' % verify_results)
-                return verify_results
+    # Update the installed flatpak if the specified commit is not installed or update install was passed
+    if is_commit_installed == False or enve_options['update-install'].value() == True:
 
-            verify_results['is_new_install'] = True
-            logger.info('%s extension install succeeded.', flatpak_extension['id'])
+        # Extract any proxy variables passed as we will need internet access for extension installation
+        enve_proxy_vars = \
+            ['--env=%s=%s' % (enve_var, enve_vars[enve_var]) \
+             for enve_var in enve_vars if re.search('^(https?|ftp|no)_proxy$', enve_var, re.IGNORECASE)]
+
+        # Update the flatpak
+        flatpak_cmd_args = ['update', '--assumeyes', flatpak_extension['flatpak']]
+        if is_commit_installed == False:
+            flatpak_cmd_args += ['--commit', flatpak_extension['commit']]
+            # If update install was not passed, warn that we found a commit mismatch and are updating
+            if enve_options['update-install'].value() == False:
+                logger.warning('%s installed commit mismatch, updating...', flatpak_extension['id'])
+
+        flatpak_spawn_cmd_args = enve_proxy_vars + get_flatpak_cmd(enve_options, flatpak_cmd_args)
+        if subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
+            # The update of the extension failed, meaning we can't load the specified environment and will
+            # have to abort loading the environment.
+            logger.error('%s extension update failed.', flatpak_extension['id'])
+            verify_results['is_installed'] = False
+            logger.debug('Verify Commit Results: %s' % verify_results)
+            return verify_results
+
+        verify_results['is_new_install'] = True
+        logger.info('%s extension update succeeded.', flatpak_extension['id'])
 
     logger.debug('Verify Commit Results: %s' % verify_results)
     return verify_results
@@ -190,6 +224,29 @@ def import_callback(dir_path: str, filename:str) -> [str, str]:
     if filename == 'enve.libsonnet':
         with open(ENVE_LIBSONNET_PATH) as enve_libsonnet:
             return ENVE_LIBSONNET_PATH, enve_libsonnet.read()
+
+def load_variables(enve_options: dict, variables: list) -> dict:
+    '''Add doc...'''
+
+    # Initialize the ENVE variables dictionary
+    enve_vars = { 'ENV': ENVE_BASHRC_PATH, 'BASH_ENV': ENVE_BASHRC_PATH }
+
+    # Add the ENVE global variables
+    add_variables(enve_vars, variables)
+
+    # Add the ENVE shell depth variable
+    add_enve_shell_depth_variable(enve_vars, enve_options)
+
+    # Add the ENVE prompt variable
+    add_enve_prompt_variable(enve_vars, enve_options)
+
+    # Add the ENVE current config variables
+    add_enve_current_config_variables(enve_vars, enve_options)
+
+    # Add the ENVE flatpak installation variables
+    add_enve_flatpak_installation_variable(enve_vars, enve_options)
+
+    return enve_vars
 
 def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', extension_path: str = '') -> None:
     '''Add doc...'''
@@ -204,25 +261,51 @@ def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', ex
 
         value = variable['delimiter'].join(values) if len(values) > 1 else values[0]
 
-        variable_names = ['ENVE_PATH'] if variable['path_export'] else []
+        # Ensure that export variable names are not prefixed with 'ENVE_'
+        invalid_exports = [export for export in variable['exports'] if export.find('ENVE_') == 0]
+        if invalid_exports:
+            for invalid_export in inavlid_exports:
+                logger.error('ENVE export variable name prefixed with "ENVE_": %s', invalid_export)
+            exit(1)
+
+        variable_names = [export for export in variable['exports'] if export != '']
         if extension_alias:
             variable_names += ['_'.join(['ENVE', extension_alias, variable['name']]).upper()]
         else:
             variable_names += ['_'.join(['ENVE', variable['name']]).upper()]
 
         for variable_name in variable_names:
-            if variable_name in enve_vars:
+            if variable['delimiter'] == '':
+                enve_vars[variable_name] = value
+            elif variable_name in enve_vars:
                 enve_vars[variable_name] += variable['delimiter'] + value
             elif variable['delimit_first']:
                 enve_vars[variable_name] = variable['delimiter'] + value
             else:
                 enve_vars[variable_name] = value
 
+        for variable_name in variable_names:
+            if variable_name.find('ENVE_') != 0 and variable['delimiter'] != '':
+                os_environ_var = os.environ.get(variable_name, '').strip(variable['delimiter'])
+                if os_environ_var != '':
+                    enve_vars[variable_name] += variable['delimiter'] + os_environ_var
+
+def export_variables(enve_vars: dict, is_new_enve_shell_needed: bool) -> None:
+    '''Add doc...'''
+
+    # Get the logger instance
+    logger = logging.getLogger(__name__)
+
+    logger.debug('ENVE Variables:\n%s', textwrap.indent(pprint.pformat(enve_vars), '  '))
+
+    # Export the ENVE variables into the current environment only if new shell is not needed
+    if is_new_enve_shell_needed == False:
+        for enve_var in enve_vars:
+            os.environ[enve_var] = enve_vars[enve_var]
+
 def load_enve_config(enve_options: dict) -> dict:
     '''Add doc...'''
 
-    # Initialize the ENVE variables dictionary
-    enve_vars = { }
     # Get the logger instance
     logger = logging.getLogger(__name__)
 
@@ -266,17 +349,8 @@ def load_enve_config(enve_options: dict) -> dict:
         logger.exception('Failed to load ENVE config "%s".', enve_options['use-config'].value())
         exit(1)
 
-    # Add the ENVE global variables
-    add_variables(enve_vars, enve_json['variables'])
-
-    # Add the ENVE shell depth variable
-    add_enve_shell_depth_variable(enve_vars, enve_options)
-
-    # Add the ENVE prompt variable
-    add_enve_prompt_variable(enve_vars, enve_options)
-
-    # Add the ENVE current config variables
-    add_enve_current_config_variables(enve_vars, enve_options)
+    # Load the ENVE variables
+    enve_vars = load_variables(enve_options, enve_json['variables'])
 
     # Ensure all the specified flatpak extensions are installed with the right commit versions if specified.
     for flatpak_extension in reversed(enve_json['extensions']):
@@ -293,14 +367,14 @@ def load_enve_config(enve_options: dict) -> dict:
                          textwrap.indent(pprint.pformat(flatpak_extension), '  '))
 
             # Verify the extension is installed, and attempt to install if not found
-            verify_installed_results = extension_verify_installed(enve_options, flatpak_extension)
+            verify_installed_results = extension_verify_installed(enve_vars, enve_options, flatpak_extension)
             load_results['is_new_enve_shell_needed'] |= verify_installed_results['is_new_install']
             if not verify_installed_results['is_installed']:
                 logger.error('ENVE load failed.')
                 exit(1)
 
             # Verify the extension commit matches the specified, and attempt to update if SHAs mismatch
-            verify_commit_results = extension_verify_commit(enve_options, flatpak_extension)
+            verify_commit_results = extension_verify_commit(enve_vars, enve_options, flatpak_extension)
             load_results['is_new_enve_shell_needed'] |= verify_commit_results['is_new_install']
             if not verify_commit_results['is_installed']:
                 logger.error('ENVE load failed.')
@@ -310,30 +384,15 @@ def load_enve_config(enve_options: dict) -> dict:
         add_variables(enve_vars, flatpak_extension['variables'], flatpak_extension['id_alias'],
                       flatpak_extension['path'])
 
-    logger.debug('ENVE Variables:\n%s', textwrap.indent(pprint.pformat(enve_vars), '  '))
+    if enve_options['update-install'].value() == True:
+        enve_id_version = enve_vars['ENVE_ID']
+        if 'ENVE_ID_VER' in enve_vars:
+            enve_id_version += ' %s' % enve_vars['ENVE_ID_VER']
+        print('%s update install successful.' % enve_id_version)
+        logger.info('%s update install successful.' % enve_id_version)
+        exit(0)
 
-    # Ensure that all enve_vars are prefixed with 'ENVE_'
-    bad_enve_vars = [enve_var for enve_var in enve_vars if 'ENVE_' != enve_var[:len('ENVE_')]]
-    if bad_enve_vars:
-        for bad_enve_var in bad_enve_vars:
-            logger.error('ENVE variable not prefixed with "ENVE_": %s', bad_enve_var)
-        exit(1)
-
-    # Export the ENVE variables into the current environment only if new shell is not needed
-    if load_results['is_new_enve_shell_needed'] == False:
-        for enve_var in enve_vars:
-            os.environ[enve_var] = enve_vars[enve_var]
-
-        os.environ['ENV'] = ENVE_BASHRC_PATH
-        os.environ['BASH_ENV'] = ENVE_BASHRC_PATH
-        if os.environ.get('ENVE_PATH', '') != '' and os.environ.get('PATH', '') != '':
-            os.environ['PATH'] = os.environ['PATH'].replace(os.environ['ENVE_PATH'], '').strip(':')
-        if enve_vars.get('ENVE_PATH', '') != '':
-            os.environ['PATH'] = ':'.join([enve_vars['ENVE_PATH'], os.environ['PATH'].strip(':')]).strip(':')
-
-        logger.debug('ENV=%s' % os.environ['ENV'])
-        logger.debug('BASH_ENV=%s' % os.environ['BASH_ENV'])
-        logger.debug('PATH=%s' % os.environ['PATH'])
+    export_variables(enve_vars, load_results['is_new_enve_shell_needed'])
 
     logger.debug('Load Results: %s' % load_results)
     return load_results
@@ -403,7 +462,11 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
         if not enve_options['use-config'].was_passed():
             cmd += ['--ENVE', 'use-config', enve_options['use-config'].value()]
 
-        # Always ensure the use-interactive flag is passed when using flatpak-spawn
+        # Always ensure that the flatpak installation param is passed.
+        if not enve_options['use-flatpak-installation'].was_passed():
+            cmd += ['--ENVE', 'use-flatpak-installation', enve_options['use-flatpak-installation'].value()]
+
+        # Always ensure the use-interactive flag is passed when using flatpak-spawn.
         if not enve_options['use-interactive'].was_passed():
             cmd += ['--ENVE', 'use-interactive', 't']
 
@@ -527,7 +590,11 @@ ENVE_OPTIONS = (
                '''Add doc.'''
     ),
 
-    EnveOption('use-system-flatpak', False, click.BOOL,
+    EnveOption('use-flatpak-installation', 'system', click.STRING,
+               '''Add doc.'''
+    ),
+
+    EnveOption('update-install', False, click.BOOL,
                '''Add doc.'''
     ),
 
