@@ -55,10 +55,7 @@
   },
 
   // List of global ENVE variables
-  variables: [
-    Enve.NewVariable('ID', Enve.id.name, values_are_paths=false),
-    Enve.NewVariable('ID_VER', Enve.id.version, values_are_paths=false),
-  ],
+  variables: [ ],
 
   // Template function for flatpak extension objects
   NewExtension(id, id_alias='', commit='', extension_base_name=$['runtime'].default_extension_base_name,

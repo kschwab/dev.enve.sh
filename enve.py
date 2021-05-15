@@ -61,10 +61,16 @@ def add_enve_prompt_variable(enve_vars: dict, enve_options: dict) -> None:
 
     enve_vars['ENVE_PROMPT'] = enve_prompt
 
+def add_enve_id_version_variables(enve_vars: dict, enve_id: dict) -> None:
+    '''Add doc...'''
+
+    enve_vars['ENVE_ID'] = enve_id['name']
+    enve_vars['ENVE_ID_VER'] = enve_id['version']
+
 def add_enve_current_config_variables(enve_vars: dict, enve_options: dict) -> None:
     '''Add doc...'''
 
-    enve_vars['ENVE_CURRENT_CONFIG'] = enve_options['use-config'].value()
+    enve_vars['ENVE_CURRENT_CONFIG'] = os.path.abspath(enve_options['use-config'].value())
     completed_output = subprocess.run(['sha256sum', enve_options['use-config'].value()], capture_output=True, text=True)
     if completed_output.returncode != 0:
         logger.error('Failure computing sha256sum for %s', enve_options['use-config'].value())
@@ -224,8 +230,12 @@ def import_callback(dir_path: str, filename:str) -> [str, str]:
     if filename == 'enve.libsonnet':
         with open(ENVE_LIBSONNET_PATH) as enve_libsonnet:
             return ENVE_LIBSONNET_PATH, enve_libsonnet.read()
+    else:
+        abs_path = os.path.abspath(os.path.join(dir_path, filename))
+        with open(abs_path) as enve_libsonnet:
+            return abs_path, enve_libsonnet.read()
 
-def load_variables(enve_options: dict, variables: list) -> dict:
+def load_variables(enve_options: dict, enve_id: dict, variables: list) -> dict:
     '''Add doc...'''
 
     # Initialize the ENVE variables dictionary
@@ -233,6 +243,9 @@ def load_variables(enve_options: dict, variables: list) -> dict:
 
     # Add the ENVE global variables
     add_variables(enve_vars, variables)
+
+    # Add the ENVE id variables
+    add_enve_id_version_variables(enve_vars, enve_id)
 
     # Add the ENVE shell depth variable
     add_enve_shell_depth_variable(enve_vars, enve_options)
@@ -288,6 +301,8 @@ def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', ex
             if variable_name.find('ENVE_') != 0 and variable['delimiter'] != '':
                 os_environ_var = os.environ.get(variable_name, '').strip(variable['delimiter'])
                 if os_environ_var != '':
+                    enve_vars[variable_name] = \
+                        enve_vars[variable_name].replace(variable['delimiter'] + os_environ_var, '')
                     enve_vars[variable_name] += variable['delimiter'] + os_environ_var
 
 def export_variables(enve_vars: dict, is_new_enve_shell_needed: bool) -> None:
@@ -350,7 +365,7 @@ def load_enve_config(enve_options: dict) -> dict:
         exit(1)
 
     # Load the ENVE variables
-    enve_vars = load_variables(enve_options, enve_json['variables'])
+    enve_vars = load_variables(enve_options, enve_json['id'], enve_json['variables'])
 
     # Ensure all the specified flatpak extensions are installed with the right commit versions if specified.
     for flatpak_extension in reversed(enve_json['extensions']):
