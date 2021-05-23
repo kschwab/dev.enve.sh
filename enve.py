@@ -171,10 +171,10 @@ def extension_verify_commit(enve_vars: dict, enve_options: dict, flatpak_extensi
 
     verify_results = {'is_installed': True, 'is_new_install': False}
 
-    is_commit_installed = flatpak_extension['commit'] == ''
+    is_commit_installed = flatpak_extension['commit'] == 'current_installed'
 
     # Verify the installed flatpak extension matches the commit SHA if specified.
-    if is_commit_installed == False:
+    if is_commit_installed == False and flatpak_extension['commit'] != 'latest':
 
         # Get the flatpak extension commit SHA
         flatpak_spawn_cmd = get_flatpak_spawn_cmd(get_flatpak_cmd(enve_options, ['info', '--show-commit',
@@ -203,7 +203,7 @@ def extension_verify_commit(enve_vars: dict, enve_options: dict, flatpak_extensi
 
         # Update the flatpak
         flatpak_cmd_args = ['update', '--assumeyes', flatpak_extension['flatpak']]
-        if is_commit_installed == False:
+        if is_commit_installed == False and flatpak_extension['commit'] != 'latest':
             flatpak_cmd_args += ['--commit', flatpak_extension['commit']]
             # If update install was not passed, warn that we found a commit mismatch and are updating
             if enve_options['update-install'].value() == False:
@@ -242,7 +242,9 @@ def load_variables(enve_options: dict, enve_id: dict, variables: list) -> dict:
     enve_vars = { 'ENV': ENVE_BASHRC_PATH, 'BASH_ENV': ENVE_BASHRC_PATH }
 
     # Add the ENVE global variables
-    add_variables(enve_vars, variables)
+    add_variables(enve_vars, variables,
+                  # The base path for global variables is the config file directory
+                  base_path=os.path.dirname(os.path.abspath(enve_options['use-config'].value())))
 
     # Add the ENVE id variables
     add_enve_id_version_variables(enve_vars, enve_id)
@@ -261,7 +263,7 @@ def load_variables(enve_options: dict, enve_id: dict, variables: list) -> dict:
 
     return enve_vars
 
-def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', extension_path: str = '') -> None:
+def add_variables(enve_vars: dict, variables: list, extension_alias: str='', base_path: str='') -> None:
     '''Add doc...'''
 
     # Get the logger instance
@@ -269,8 +271,10 @@ def add_variables(enve_vars: dict, variables: list, extension_alias: str ='', ex
 
     for variable in variables:
         values = variable['values']
-        if variable['values_are_paths'] and extension_path:
-            values = [os.path.join(extension_path, value).rstrip('/') for value in values]
+        if variable['values_are_paths'] and base_path:
+            for index in range(len(values)):
+                if not os.path.isabs(values[index]):
+                    values[index] = os.path.abspath(os.path.join(base_path, values[index]))
 
         value = variable['delimiter'].join(values) if len(values) > 1 else values[0]
 
@@ -366,6 +370,9 @@ def load_enve_config(enve_options: dict) -> dict:
 
     # Load the ENVE variables
     enve_vars = load_variables(enve_options, enve_json['id'], enve_json['variables'])
+
+    # Add the ENVE base extension to the front of the list of extensions
+    enve_json['extensions'].insert(0, enve_json['id']['enve_base_extension'])
 
     # Ensure all the specified flatpak extensions are installed with the right commit versions if specified.
     for flatpak_extension in reversed(enve_json['extensions']):
@@ -605,7 +612,7 @@ ENVE_OPTIONS = (
                '''Add doc.'''
     ),
 
-    EnveOption('use-flatpak-installation', 'system', click.STRING,
+    EnveOption('use-flatpak-installation', 'user', click.STRING,
                '''Add doc.'''
     ),
 

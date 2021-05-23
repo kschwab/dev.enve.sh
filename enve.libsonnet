@@ -1,17 +1,32 @@
+
+local enve_base_releases = {
+  latest: 'latest',
+  current_installed: 'current_installed',
+};
+
 {
   local Enve = self,
 
   // Template function for ENVE ID objects
-  NewId(name, version=''):: {
+  NewId(name, version='', enve_base_release='current_installed'):: {
     assert std.isString(name): 'ENVE ID name must be a string.',
     assert std.isString(version): 'ENVE ID version must be a string when specified.',
+    assert std.isString(enve_base_release): 'ENVE ID base release must be a string.',
 
     name: name,
     version: version,
+    enve_base_extension: Enve.NewExtension('enve',
+      commit=if std.objectHas(enve_base_releases, enve_base_release)
+             then enve_base_releases[enve_base_release]
+             else enve_base_release,
+      variables=[
+        Enve.NewVariable('BIN', 'bin', exports='PATH'),
+        Enve.NewVariable('LIB', 'lib'),
+      ]),
   },
 
   // The default ENVE ID
-  id: Enve.NewId('ENVE Base', '01.01.21'),
+  id: Enve.NewId('ENVE Base', '05.23.21'),
 
   // Template function for Runtime objects
   NewRuntime(name, branch, arch='x86_64', default_extension_base_name='org.freedesktop.Sdk.Extension',
@@ -58,12 +73,13 @@
   variables: [ ],
 
   // Template function for flatpak extension objects
-  NewExtension(id, id_alias='', commit='', extension_base_name=$['runtime'].default_extension_base_name,
+  NewExtension(id, id_alias='', commit='current_installed', extension_base_name=$['runtime'].default_extension_base_name,
   extension_mount_point=$['runtime'].default_extension_mount_point, remote_name=$['runtime'].default_remote_name,
   variables=[]):: {
     assert std.isString(id): 'Extension ID must be a string.',
     assert std.isString(id_alias): id + ' alias must be a string when specified.',
     assert std.isString(commit): id + ' commit must be a string when specified.',
+    assert commit != '': id + ' commit value must be specified.',
     assert std.isString(extension_base_name): 'Extension base name must be a string.',
     assert std.isString(extension_mount_point): 'Extension mount point must be a string.',
     assert std.isString(remote_name): 'Extension remote name must be a string.',
@@ -79,10 +95,5 @@
   },
 
   // List of ENVE flatpak extensions
-  extensions: [
-    Enve.NewExtension('enve', variables=[
-      Enve.NewVariable('BIN', 'bin', exports='PATH'),
-      Enve.NewVariable('LIB', 'lib'),
-    ]),
-  ],
+  extensions: [ ],
 }
