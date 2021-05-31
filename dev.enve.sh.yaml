@@ -8,6 +8,15 @@ sdk-extensions:
 
 command: /usr/lib/sdk/enve/bin/enve
 
+modules:
+  - name: enve
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 dev.enve.sh.xml.gz $FLATPAK_DEST/share/app-info/xmls/dev.enve.sh.xml.gz
+    sources:
+      - type: file
+        path: dev.enve.sh.xml.gz
+
 finish-args:
   - --filesystem=host
   - --socket=session-bus
