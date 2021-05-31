@@ -70,6 +70,7 @@ modules:
       - ln -s $FLATPAK_DEST/src/enve_motd.py $FLATPAK_DEST/bin/motd
       - ln -s $FLATPAK_DEST/src/enve_bash $FLATPAK_DEST/bin/bash
       - ln -s $FLATPAK_DEST/src/enve_sh $FLATPAK_DEST/bin/sh
+      - install -Dm644 org.freedesktop.Sdk.Extension.enve.xml.gz $FLATPAK_DEST/share/app-info/xmls/org.freedesktop.Sdk.Extension.enve.xml.gz
     sources:
       - type: file
         path: enve.py
@@ -91,3 +92,5 @@ modules:
         dest-filename: enve_sh
         commands:
           - exec /bin/sh --noprofile $@
+      - type: file
+        path: org.freedesktop.Sdk.Extension.enve.xml.gz

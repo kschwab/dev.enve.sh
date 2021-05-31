@@ -13,8 +13,14 @@ modules:
     build-commands:
       - chmod a+x hello
       - install hello $FLATPAK_DEST
+      - install -Dm644 org.freedesktop.Sdk.Extension.Hello.xml.gz $FLATPAK_DEST/share/app-info/xmls/org.freedesktop.Sdk.Extension.Hello.xml.gz
+      # - install -Dm755 org.freedesktop.Sdk.Extension.enve.appdata.xml $FLATPAK_DEST/share/appdata/org.freedesktop.Sdk.Extension.Hello.appdata.xml
     sources:
       - type: script
         dest-filename: hello
         commands:
           - printf "Hello World!\n"
+      - type: file
+        path: org.freedesktop.Sdk.Extension.Hello.xml.gz
+      # - type: file
+      #   path: org.freedesktop.Sdk.Extension.Hello.appdata.xml

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="runtime">
+  <id>org.freedesktop.Sdk.Extension.Hello</id>
+  <name>Hello World</name>
+  <summary>Hello world extension example.</summary>
+  <description>
+    <p>
+      A detailed description of the hello world extension example.
+    </p>
+  </description>
+  <project_license>Hello Extension Licence</project_license>
+  <releases>
+    <release date="2021-05-31" version="1.0"/>
+  </releases>
+</component>

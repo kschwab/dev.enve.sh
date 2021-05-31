@@ -85,12 +85,9 @@ def add_enve_shell_depth_variable(enve_vars: dict, enve_options: dict) -> None:
     logger = logging.getLogger(__name__)
 
     if 'ENVE_SHELL_DEPTH' not in os.environ:
-        os.environ['ENVE_SHELL_DEPTH'] = '0'
-    elif enve_options['update-install'].value() == True:
-        logger.error('ENVE "update install" cannot be called from within ENVE container.')
-        exit(1)
-
-    enve_vars['ENVE_SHELL_DEPTH'] = os.environ['ENVE_SHELL_DEPTH']
+        enve_vars['ENVE_SHELL_DEPTH'] = '0'
+    else:
+        enve_vars['ENVE_SHELL_DEPTH'] = os.environ['ENVE_SHELL_DEPTH']
 
 def add_enve_flatpak_installation_variable(enve_vars: dict, enve_options: dict) -> None:
     '''Add doc...'''
@@ -137,28 +134,88 @@ def extension_verify_installed(enve_vars: dict, enve_options: dict, flatpak_exte
 
     # We have to run flatpak commands in the host environment. A return code of 0 from flatpak info indicates
     # the extension is installed.
-    flatpak_spawn_cmd = get_flatpak_spawn_cmd(get_flatpak_cmd(enve_options, ['info', flatpak_extension['flatpak']]))
-    if subprocess.run(flatpak_spawn_cmd, capture_output=True).returncode != 0:
-        logger.warning('%s extension missing, installing...', flatpak_extension['id'])
+    flatpak_cmd_args = ['info', '--show-origin', flatpak_extension['flatpak']]
+    flatpak_spawn_cmd = get_flatpak_spawn_cmd(get_flatpak_cmd(enve_options, flatpak_cmd_args))
+    completed_output = subprocess.run(flatpak_spawn_cmd, capture_output=True, text=True)
+
+    is_install_needed = completed_output.returncode != 0
+    original_remote_name = '' if is_install_needed else completed_output.stdout.strip()
+
+    # Check to see if we need to re-install the extension from a different remote
+    if is_install_needed == False and flatpak_extension['remote_name'] != '':
+        if original_remote_name != flatpak_extension['remote_name']:
+            logger.warning('"%s" extension is currently installed from remote "%s" instead of "%s". Removing...',
+                           flatpak_extension['id'], original_remote_name, flatpak_extension['remote_name'])
+
+            # Extensions can not be removed dynamically as it will affect the container stack. Therefore, only allow
+            # extensions to be removed when running outside of a container.
+            if 'ENVE_SHELL_DEPTH' in os.environ:
+                logger.error('"%s" extension removal failed. Cannot remove extension when inside container.',
+                             flatpak_extension['id'])
+                verify_results['is_installed'] = False
+                logger.debug('Verify Installed Results: %s' % verify_results)
+                return verify_results
+
+            flatpak_spawn_cmd_args = \
+                get_flatpak_cmd(enve_options, ['remove', '--assumeyes', flatpak_extension['flatpak']])
+
+            # Remove the current install as it was installed from a different remote than the one specified
+            if subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
+                # The installation of the extension failed, meaning we can't load the specified environment and will
+                # have to abort.
+                logger.error('"%s" extension removal failed.', flatpak_extension['id'])
+                verify_results['is_installed'] = False
+                logger.debug('Verify Installed Results: %s' % verify_results)
+                return verify_results
+
+            is_install_needed = True
+
+    if is_install_needed == True:
+        logger.warning('"%s" extension missing, installing...', flatpak_extension['id'])
 
         # Extract any proxy variables passed as we will need internet access for extension installation
         enve_proxy_vars = \
             ['--env=%s=%s' % (enve_var, enve_vars[enve_var]) \
              for enve_var in enve_vars if re.search('^(https?|ftp|no)_proxy$', enve_var, re.IGNORECASE)]
 
-        # The extension is missing, so attempt to install. A return code of 0 means it installed successfully.
-        flatpak_cmd_args = ['install', '--assumeyes', flatpak_extension['remote_name'], flatpak_extension['flatpak']]
+        flatpak_cmd_args = \
+            ['install', '--assumeyes'] + \
+            ([flatpak_extension['remote_name']] if flatpak_extension['remote_name'] != '' else []) + \
+            [flatpak_extension['flatpak']]
+
         flatpak_spawn_cmd_args = enve_proxy_vars + get_flatpak_cmd(enve_options, flatpak_cmd_args)
+        # The extension is missing, so attempt to install. A return code of 0 means it installed successfully.
         if subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
+
+            # If the enve extension install failed, try to restore a working copy before dying
+            if flatpak_extension['id'] == 'enve' and original_remote_name != '':
+                logger.warning('"%s" base extension was removed. Attempt to restore from remote "%s"...',
+                               flatpak_extension['id'], original_remote_name)
+
+                flatpak_cmd_args = \
+                    ['install', '--assumeyes', original_remote_name, flatpak_extension['flatpak']]
+                flatpak_spawn_cmd_args = enve_proxy_vars + get_flatpak_cmd(enve_options, flatpak_cmd_args)
+                if subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args), capture_output=True).returncode != 0:
+                    logger.warning('"%s" base extension restore from "%s" failed.', flatpak_extension['id'],
+                                   original_remote_name)
+                else:
+                    logger.warning('"%s" base extension was restored from remote "%s".', flatpak_extension['id'],
+                                   original_remote_name)
+
             # The installation of the extension failed, meaning we can't load the specified environment and will
             # have to abort.
-            logger.error('%s extension install failed.', flatpak_extension['id'])
+            if flatpak_extension['remote_name'] != '':
+                logger.error('"%s" extension install from remote "%s" failed.', flatpak_extension['id'],
+                             flatpak_extension['remote_name'])
+            else:
+                logger.error('"%s" extension install failed.', flatpak_extension['id'])
+
             verify_results['is_installed'] = False
             logger.debug('Verify Installed Results: %s' % verify_results)
             return verify_results
 
         verify_results['is_new_install'] = True
-        logger.info('%s extension install succeeded.', flatpak_extension['id'])
+        logger.info('"%s" extension install succeeded.', flatpak_extension['id'])
 
     logger.debug('Verify Installed Results: %s' % verify_results)
     return verify_results
@@ -213,13 +270,13 @@ def extension_verify_commit(enve_vars: dict, enve_options: dict, flatpak_extensi
         if subprocess.run(get_flatpak_spawn_cmd(flatpak_spawn_cmd_args)).returncode != 0:
             # The update of the extension failed, meaning we can't load the specified environment and will
             # have to abort loading the environment.
-            logger.error('%s extension update failed.', flatpak_extension['id'])
+            logger.error('"%s" extension update failed.', flatpak_extension['id'])
             verify_results['is_installed'] = False
             logger.debug('Verify Commit Results: %s' % verify_results)
             return verify_results
 
         verify_results['is_new_install'] = True
-        logger.info('%s extension update succeeded.', flatpak_extension['id'])
+        logger.info('"%s" extension update succeeded.', flatpak_extension['id'])
 
     logger.debug('Verify Commit Results: %s' % verify_results)
     return verify_results
@@ -371,8 +428,13 @@ def load_enve_config(enve_options: dict) -> dict:
     # Load the ENVE variables
     enve_vars = load_variables(enve_options, enve_json['id'], enve_json['variables'])
 
+    # Cannot update install when inside a currently active container
+    if enve_options['update-install'].value() == True and 'ENVE_SHELL_DEPTH' in os.environ:
+        logger.error('ENVE "update install" cannot be called from within ENVE container.')
+        exit(1)
+
     # Add the ENVE base extension to the front of the list of extensions
-    enve_json['extensions'].insert(0, enve_json['id']['enve_base_extension'])
+    enve_json['extensions'].insert(0, enve_json['base_extension_version'])
 
     # Ensure all the specified flatpak extensions are installed with the right commit versions if specified.
     for flatpak_extension in reversed(enve_json['extensions']):
@@ -382,8 +444,8 @@ def load_enve_config(enve_options: dict) -> dict:
         if os.environ.get('ENVE_CURRENT_CONFIG_SHA_256', '') == enve_vars['ENVE_CURRENT_CONFIG_SHA_256']:
             pass
 
-        # Otherwise, only verify the install if a new shell is needed or the shell depth is 0.
-        elif load_results['is_new_enve_shell_needed'] == True or enve_vars['ENVE_SHELL_DEPTH'] == '0':
+        # Otherwise, only verify the install if a new shell is needed or we're not inside a currently active container.
+        elif load_results['is_new_enve_shell_needed'] == True or 'ENVE_SHELL_DEPTH' not in os.environ:
             logger.info('Verifying Extension: %s', flatpak_extension['flatpak'])
             logger.debug('%s:\n%s', flatpak_extension['flatpak'],
                          textwrap.indent(pprint.pformat(flatpak_extension), '  '))
@@ -502,7 +564,7 @@ def run_cmd(cmd: list, enve_options: dict) -> None:
              '--allow=multiarch',
              '--share=network',
              '--device=all',
-             '--env=ENVE_SHELL_DEPTH=%s' % str(int(os.environ['ENVE_SHELL_DEPTH']) + 1),
+             '--env=ENVE_SHELL_DEPTH=%s' % str(int(os.environ.get('ENVE_SHELL_DEPTH', '0')) + 1),
              '--env=TERM=%s' % os.environ.get('TERM', '')] + cmd
         flatpak_spawn_cmd_args = ['--watch-bus'] + get_flatpak_cmd(enve_options, flatpak_cmd_args)
 
