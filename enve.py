@@ -3,8 +3,6 @@
 # TODO: Work on a way for developer to have own local config
 # TODO: Clean up help
 # TODO: Add sandbox option
-# TODO: Look at switching extension/variable configs into object instead of list for explicit overriding (or, add an
-#       option that says to use the last extension specified)
 
 # NOTE: pty2 lifted and modified from https://github.com/python/cpython/pull/21752/files
 
@@ -152,6 +150,8 @@ def extension_verify_installed(enve_vars: dict, enve_options: dict, flatpak_exte
             if 'ENVE_SHELL_DEPTH' in os.environ:
                 logger.error('"%s" extension removal failed. Cannot remove extension when inside container.',
                              flatpak_extension['id'])
+                logger.error('Try exiting the container first before loading new config "%s".',
+                             enve_options['use-config'].value())
                 verify_results['is_installed'] = False
                 logger.debug('Verify Installed Results: %s' % verify_results)
                 return verify_results
@@ -252,6 +252,19 @@ def extension_verify_commit(enve_vars: dict, enve_options: dict, flatpak_extensi
 
     # Update the installed flatpak if the specified commit is not installed or update install was passed
     if is_commit_installed == False or enve_options['update-install'].value() == True:
+
+        # Extension updates to a specific commit can not be done dynamically as it will affect the container
+        # stack. Therefore, only allow extensions to be updates to a specific commit when running outside of a
+        # container.
+        if 'ENVE_SHELL_DEPTH' in os.environ:
+            logger.error('"%s" extension update to commit failed. ' +
+                         'Cannot update extension to commit when inside container.',
+                         flatpak_extension['id'])
+            logger.error('Try exiting the container first before loading new config "%s".',
+                         enve_options['use-config'].value())
+            verify_results['is_installed'] = False
+            logger.debug('Verify Commit Results: %s' % verify_results)
+            return verify_results
 
         # Extract any proxy variables passed as we will need internet access for extension installation
         enve_proxy_vars = \
